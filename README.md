@@ -1,41 +1,45 @@
 # SimpleTerminalPy
 
-用 **Python + PySDL2 + PIL** 重写的嵌入式掌机终端模拟器，基于 [SimpleTerminal](https://github.com/haoict/SimpleTerminal)（C/SDL2 版）移植。
+[English](README.md) | [简体中文](README_zh.md)
 
-- 完整 VT100 转义序列解析（30+ CSI 命令）
-- 256 色 + SGR 属性（粗体/下划线/反显/闪烁）
-- PTY 交互式 shell（vim / top / htop 等均可运行）
-- 屏幕虚拟键盘（OSK）
-- Scrollback 历史缓冲（256 行）
-- 中文双列宽显示 + CJK 字体回退
-- 按键校准向导（自适应任何掌机）
+A terminal emulator for embedded Linux handheld consoles, rewritten in **Python + PySDL2 + PIL**, ported from [SimpleTerminal](https://github.com/haoict/SimpleTerminal) (C/SDL2 version).
+
+- Full VT100 escape sequence parser (30+ CSI commands)
+- 256 colors + SGR attributes (bold / underline / reverse / blink)
+- Interactive PTY shell (vim, top, htop, and more)
+- On-screen keyboard (OSK)
+- Scrollback buffer (256 lines)
+- CJK double-width rendering + CJK font fallback
+- **Key calibration wizard** — adapts to any handheld automatically
 
 ---
 
-## 运行
+## Running
 
 ```bash
-# 启动脚本（APPS 目录）
+# Via launcher script (put in APPS dir)
 ./SimpleTerminalPy.sh
 
-# 直接运行
+# Directly
 python3 main.py
 
-# 强制重新校准按键
+# Force re-calibrate keys
 python3 main.py -reset-keymap
 
-# 命令行参数
+# Command line options
 python3 main.py [-scale 2.0] [-font font.ttf] [-fontsize 12]
                 [-fontshade 0|1|2] [-rotate 0|90|180|270]
                 [-term xterm-256color] [-platform rg34xxsp]
                 [-r "command"] [-q]
 ```
 
+**Dependencies**: `python3`, `pysdl2`, `Pillow` (SDL2 system libraries required)
+
 ---
 
-## 按键校准（首次启动）
+## Key Calibration (first launch)
 
-首次启动（或 `-reset-keymap`）会进入**按键校准向导**：
+On first launch (or with `-reset-keymap`), the **key calibration wizard** appears:
 
 ```
         KEY SETUP
@@ -45,15 +49,15 @@ python3 main.py [-scale 2.0] [-font font.ttf] [-fontsize 12]
     Short press = confirm | Hold 3s = abort
 ```
 
-| 操作 | 行为 |
-|------|------|
-| **短按**（按下并松开） | 确认当前键 → 记录 → 进入下一个 |
-| **长按 3 秒** | 放弃校准，退出程序，不保存任何数据 |
-| **按到已分配的键** | 不推进，等待按不同的键 |
+| Action | Behavior |
+|--------|----------|
+| **Short press** (press & release) | Confirm current key → record → next |
+| **Hold 3 seconds** | Abort calibration, exit without saving |
+| **Press an already-assigned key** | Ignored, wait for a different key |
 
-校准顺序：`UP → DOWN → LEFT → RIGHT → A → B → X → Y → MENU → SELECT → START → L1 → R1 → L2 → R2`
+Calibration order: `UP → DOWN → LEFT → RIGHT → A → B → X → Y → MENU → SELECT → START → L1 → R1 → L2 → R2`
 
-校准结果保存为 `key_map.json`（与程序同目录）：
+Results are saved to `key_map.json` (next to the program):
 
 ```json
 {
@@ -65,120 +69,120 @@ python3 main.py [-scale 2.0] [-font font.ttf] [-fontsize 12]
 }
 ```
 
-- `type`: `btn`（手柄按钮）/ `hat`（D-Pad）/ `key`（键盘通道）/ `cbtn`（GameController）
-- `device`: 来源设备 ID —— key 通道必须匹配，**避免蓝牙键盘同键码冲突**
+- `type`: `btn` (joystick button) / `hat` (D-pad) / `key` (keyboard channel) / `cbtn` (game controller)
+- `device`: source device ID — must match for the key channel, **preventing conflicts with Bluetooth keyboards**
 
 ---
 
-## 按键功能
+## Button Functions
 
-> 所有按键在首次启动时由玩家校准定义，以下为逻辑键功能。
+> Physical buttons are defined by the player during calibration; the table below lists logical key functions.
 
-### 全局（任何模式下生效）
+### Global (active in any mode)
 
-| 按键 | 功能 |
-|------|------|
-| **MENU** | 退出程序 |
-| **X** | 显示 / 隐藏 OSK |
-| **Y** | 切换 OSK 位置（底部 / 顶部） |
+| Button | Function |
+|--------|----------|
+| **MENU** | Quit program |
+| **X** | Show / hide OSK |
+| **Y** | Toggle OSK position (bottom / top) |
 
-### OSK 显示时（虚拟键盘可见）
+### When OSK is visible
 
-| 按键 | 功能 |
-|------|------|
-| **D-Pad (UP/DOWN/LEFT/RIGHT)** | 移动 OSK 光标（长按加速） |
-| **A** | 按下 OSK 当前选中的键 |
+| Button | Function |
+|--------|----------|
+| **D-Pad (UP/DOWN/LEFT/RIGHT)** | Move OSK cursor (hold to repeat) |
+| **A** | Press the selected OSK key |
 | **B** | Backspace |
-| **L1** | 按住式 Shift（按住=大写，松开=小写） |
-| **R1** | Sticky 修饰键（选中 Ctrl/Alt/⇧ 键后按 R1 锁定/解锁） |
-| **L2** | 左方向键（直通终端，vim 中可用） |
-| **R2** | 右方向键（直通终端，vim 中可用） |
+| **L1** | Hold-shift (hold = uppercase, release = lowercase) |
+| **R1** | Sticky modifier (select Ctrl/Alt/⇧ key, then press R1 to lock/unlock) |
+| **L2** | Left arrow (pass-through to terminal, works in vim) |
+| **R2** | Right arrow (pass-through to terminal, works in vim) |
 | **START** | Enter |
 | **SELECT** | Tab |
 
-### OSK 隐藏时（直通模式，运行 vim/htop/top 等）
+### When OSK is hidden (pass-through mode — vim/htop/top, etc.)
 
-| 按键 | 功能 |
-|------|------|
-| **D-Pad (UP/DOWN/LEFT/RIGHT)** | 方向键 |
+| Button | Function |
+|--------|----------|
+| **D-Pad (UP/DOWN/LEFT/RIGHT)** | Arrow keys |
 | **A** | Enter |
 | **B** | Ctrl+C |
 | **SELECT** | Tab |
-| **L2** | Scrollback 上翻 3 行 |
-| **R2** | Scrollback 下翻 3 行 |
+| **L2** | Scrollback up 3 lines |
+| **R2** | Scrollback down 3 lines |
 
-### 物理键盘（外接 USB / 蓝牙键盘）
+### Physical keyboard (USB / Bluetooth)
 
-| 按键 | 功能 |
-|------|------|
-| 字母 / 数字 / 符号 | 正常输入（IME 组合文本经 SDL_TEXTINPUT） |
-| 方向键 / Home / End / PageUp / PageDown / F1-F12 | 标准转义序列 |
-| Ctrl + 字母 | 控制字符（Ctrl+C / Ctrl+D 等） |
-| Tab / Shift+Tab | Tab / 反向 Tab |
-| Enter / Alt+Enter | 回车 / ESC+回车 |
-| Ctrl+Shift+V | 剪贴板粘贴 |
+| Key | Function |
+|-----|----------|
+| Letters / digits / symbols | Normal input (IME composition via SDL_TEXTINPUT) |
+| Arrows / Home / End / PageUp / PageDown / F1-F12 | Standard escape sequences |
+| Ctrl + letter | Control characters (Ctrl+C, Ctrl+D, etc.) |
+| Tab / Shift+Tab | Tab / reverse tab |
+| Enter / Alt+Enter | Return / ESC+Return |
+| Ctrl+Shift+V | Paste from clipboard |
 
-> 蓝牙键盘与掌机按键隔离：key 通道的设备 ID 不匹配时不会被当作掌机键。
+> Bluetooth keyboards are isolated from handheld buttons: a key channel event only maps to a handheld button when its device ID matches calibration.
 
 ---
 
-## OSK 使用
+## Using the OSK
 
-- **A** 选中并输入高亮键
-- **L1** 按住切换大写，松开恢复小写
-- **R1** 锁定修饰键（sticky）：把光标移到 `Ctrl`/`Alt`/`⇧` 键上按 R1 锁定，再按字母即可输入组合键（如 Ctrl+A）；再按 R1 解锁
-- **R1 锁定 Shift**：大写锁定（L1 不影响锁定的 Shift）
-- 符号层通过 OSK 上的 `#+=` 键进入，`ABC` 键返回
-- **X** 随时显示/隐藏 OSK
+- **A** presses the highlighted key
+- **L1** hold for uppercase, release to return to lowercase
+- **R1** sticky modifiers: move cursor to `Ctrl` / `Alt` / `⇧` and press R1 to lock, then press letters for combos (e.g. Ctrl+A); press R1 again to unlock
+- **R1-locked Shift** acts as Caps Lock (L1 does not affect a locked shift)
+- Symbol layer via the `#+=` key on the OSK, `ABC` to return
+- **X** shows / hides the OSK anytime
 
 ---
 
 ## Scrollback
 
-- **L2 / R2**：上下翻 3 行（OSK 隐藏时）
-- 屏幕右上角显示 `[N]^` 滚动指示器
-- 按任何其他键自动回到屏幕底部
+- **L2 / R2**: scroll up / down 3 lines (when OSK is hidden)
+- `[N]^` indicator in the top-right corner while scrolled
+- Pressing any other key returns to the bottom
 
 ---
 
-## 文件结构
+## File Structure
 
 ```
 SimpleTerminalPy/
-├── main.py              # 主循环 + 事件分发 + 启动流程
-├── config.py            # 调色板（259 色）+ 默认配置
-├── terminal.py          # Glyph / Term / Cursor 数据模型
-├── vt100.py             # VT100 状态机（30+ CSI 命令）
-├── pty_handler.py       # PTY 创建 + select 读取线程
-├── renderer.py          # PIL 脏行增量渲染 + 字形 LRU 缓存
-├── osk.py               # 屏幕虚拟键盘
-├── input_handler.py     # 事件 (type, value, device) → 逻辑键
-├── key_calibrate.py     # 按键校准向导
-├── platform_config.py   # 平台预设（保留备用）
+├── main.py              # Main loop + event dispatch + startup flow
+├── config.py            # Color palette (259 colors) + defaults
+├── terminal.py          # Glyph / Term / Cursor data model
+├── vt100.py             # VT100 state machine (30+ CSI commands)
+├── pty_handler.py       # PTY creation + select reader thread
+├── renderer.py          # PIL dirty-line incremental renderer + glyph LRU cache
+├── osk.py               # On-screen keyboard
+├── input_handler.py     # Event (type, value, device) → logical key
+├── key_calibrate.py     # Key calibration wizard
+├── platform_config.py   # Platform presets (kept for reference)
 ├── wcwidth.py           # Unicode East Asian Width
-├── key_map.json         # 玩家校准结果（运行时生成）
-├── SimpleTerminalPy.sh  # 启动脚本（放 APPS 目录）
-└── sync_to_app.sh       # 同步到 SD 卡脚本
+├── key_map.json         # Player calibration result (generated at runtime)
+├── SimpleTerminalPy.sh  # Launcher script (put in APPS dir)
+└── sync_to_app.sh       # Sync-to-SD-card script
 ```
 
 ---
 
-## 同步到掌机
+## Syncing to the Console
 
 ```bash
-# 将代码同步到 /mnt/sdcard/Roms/APPS/SimpleTerminalPy
-# 自动清理 __pycache__ 和 key_map.json（下次启动重新校准）
+# Sync code to /mnt/sdcard/Roms/APPS/SimpleTerminalPy
+# Automatically clears __pycache__ and key_map.json (re-calibrate on next start)
 bash sync_to_app.sh
 ```
 
 ---
 
-## 已知限制
+## Known Limitations
 
-- 中文显示依赖设备上的 CJK 字体（自动检测常见路径，未找到则显示方框）
-- 彩色 Emoji 不支持（嵌入式终端合理取舍）
-- 极端全屏刷新（如 vim 首次启动）可能有短暂掉帧
+- Chinese rendering depends on a CJK font on the device (auto-detects common paths; shows boxes if missing)
+- Color emoji not supported (reasonable trade-off for embedded terminals)
+- Possible brief frame drops on extreme full-screen refreshes (e.g. vim initial startup)
 
-## 许可
+## License
 
-MIT License — 基于 [SimpleTerminal](https://github.com/haoict/SimpleTerminal)（MIT）
+MIT License — based on [SimpleTerminal](https://github.com/haoict/SimpleTerminal) (MIT)
