@@ -99,6 +99,23 @@ class OSK:
         self.COLOR_TOGGLED = (192, 192, 0, 255)
         self.COLOR_TEXT = (220, 220, 220, 255)
 
+        # 渲染缓存 — 只在状态变化时重建，避免每帧重画整张键盘
+        self._cache: Image.Image | None = None
+        self._dirty = True
+
+        # 字体只加载一次（不要每次 render 都 truetype）
+        self._font = None
+        try:
+            self._font = ImageFont.truetype(
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 14)
+        except OSError:
+            self._font = ImageFont.load_default()
+
+    def invalidate(self):
+        """状态变化时标记缓存失效。"""
+        self._dirty = True
+        self._cache = None
+
     # ── 布局 ──────────────────────────────────────────
 
     @property
@@ -116,27 +133,29 @@ class OSK:
     def move_left(self):
         row = self.current_layout[self.row]
         self.col = (self.col - 1) % len(row)
+        self.invalidate()
 
     def move_right(self):
         row = self.current_layout[self.row]
         self.col = (self.col + 1) % len(row)
+        self.invalidate()
 
     def move_up(self):
         nrows = len(self.current_layout)
-        old_row = self.row
         self.row = (self.row - 1) % nrows
         # 对齐列数
         new_len = len(self.current_layout[self.row])
         if self.col >= new_len:
             self.col = new_len - 1
+        self.invalidate()
 
     def move_down(self):
         nrows = len(self.current_layout)
-        old_row = self.row
         self.row = (self.row + 1) % nrows
         new_len = len(self.current_layout[self.row])
         if self.col >= new_len:
             self.col = new_len - 1
+        self.invalidate()
 
     # ── 按键动作 ──────────────────────────────────────
 
@@ -163,6 +182,7 @@ class OSK:
             elif label == "ABC":
                 self.mode = "lower"
                 self.shift_locked = False
+            self.invalidate()
             return None
 
         # 普通字符 — 应用锁定的 Ctrl/Alt 修饰
@@ -182,6 +202,7 @@ class OSK:
         # 单次 Shift（非锁定时打完一个自动回小写）
         if self.mode == "upper" and not self.shift_locked:
             self.mode = "lower"
+            self.invalidate()
 
         return result
 
@@ -198,10 +219,13 @@ class OSK:
         if output is not None:
             return  # 普通键不 sticky
 
+        changed = False
         if label == "Ctrl":
             self.ctrl = not self.ctrl
+            changed = True
         elif label == "Alt":
             self.alt = not self.alt
+            changed = True
         elif label == "⇧":
             if not self.shift_locked:
                 self.mode = "upper"
@@ -209,16 +233,21 @@ class OSK:
             else:
                 self.mode = "lower"
                 self.shift_locked = False
+            changed = True
+        if changed:
+            self.invalidate()
 
     def shift_down(self):
         """L1 按下 → 切到 upper 布局（原版按住式 Shift）。"""
         if not self.shift_locked:
             self.mode = "upper"
+            self.invalidate()
 
     def shift_up(self):
         """L1 松开 → 回 lower 布局。"""
         if not self.shift_locked:
             self.mode = "lower"
+            self.invalidate()
 
     # ── 渲染 ──────────────────────────────────────────
 
@@ -226,7 +255,12 @@ class OSK:
         """把键盘渲染为一张 RGBA PIL Image。
 
         尺寸 = 屏幕宽度 × 键盘高度。位置由调用方合成时决定。
+        使用缓存：状态未变化时直接返回上次结果，
+        避免每次主循环都重画整张键盘（CPU 占用大头）。
         """
+        if not self._dirty and self._cache is not None:
+            return self._cache
+
         layout = self.current_layout
         nrows = len(layout)
 
@@ -248,12 +282,7 @@ class OSK:
         # 居中键盘内容
         offset_x = (self.screen_w - kb_w) // 2 + self.margin
 
-        # 加载字体
-        try:
-            font = ImageFont.truetype(
-                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 14)
-        except OSError:
-            font = ImageFont.load_default()
+        font = self._font
 
         for r, row in enumerate(layout):
             for c, (label, output) in enumerate(row):
@@ -290,4 +319,6 @@ class OSK:
                 draw.text((tx, ty), label,
                           fill=self.COLOR_TEXT, font=font)
 
+        self._cache = img
+        self._dirty = False
         return img
