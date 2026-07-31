@@ -82,6 +82,11 @@ class PtyHandler:
             os.environ.pop("LINES", None)
             os.environ.pop("TERMCAP", None)  # type: ignore
 
+            # 补全 PATH — 从掌机菜单等精简环境启动时，
+            # 常见用户路径（nvm node bin、~/.local/bin 等）可能缺失，
+            # 导致 claude 等用户工具找不到。
+            self._augment_path()
+
             # 执行启动命令（-r 选项）
             for cmd in self.cmd_list:
                 print(f"\n$ {cmd}")
@@ -94,6 +99,29 @@ class PtyHandler:
         except Exception as e:
             print(f"Child setup failed: {e}", file=__import__('sys').stderr)
             os._exit(1)
+
+    @staticmethod
+    def _augment_path():
+        """把常见用户 bin 目录加入 PATH（幂等，只加存在的目录）。"""
+        home = os.path.expanduser("~")
+        existing = [p for p in os.environ.get("PATH", "").split(":") if p]
+
+        extra = [
+            os.path.join(home, ".local/bin"),
+            os.path.join(home, "bin"),
+        ]
+        # nvm 的 node bin（claude 等 npm 全局工具）
+        nvm_dir = os.path.join(home, ".nvm", "versions", "node")
+        if os.path.isdir(nvm_dir):
+            for ver in sorted(os.listdir(nvm_dir)):
+                b = os.path.join(nvm_dir, ver, "bin")
+                if os.path.isdir(b):
+                    extra.append(b)
+
+        for p in extra:
+            if p not in existing and os.path.isdir(p):
+                existing.insert(0, p)
+        os.environ["PATH"] = ":".join(existing)
 
     def _set_winsize(self, rows: int, cols: int):
         """设置 PTY 窗口大小。"""
