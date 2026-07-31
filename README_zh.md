@@ -12,6 +12,13 @@
 - 中文双列宽显示（自带 CJK 字体，Apache 2.0）
 - 按键校准向导（自适应任何掌机）
 
+## 截图
+
+<img src="screenshots/screenshot1.jpg" alt="截图 1" width="250"/>
+<img src="screenshots/screenshot2.jpg" alt="截图 2" width="250"/>
+<img src="screenshots/screenshot3.jpg" alt="截图 3" width="250"/>
+<img src="screenshots/screenshot4.jpg" alt="截图 4" width="250"/>
+
 ---
 
 ## 运行

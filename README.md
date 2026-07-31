@@ -12,6 +12,13 @@ A terminal emulator for embedded Linux handheld consoles, rewritten in **Python 
 - CJK double-width rendering (bundled fonts, Apache 2.0)
 - **Key calibration wizard** — adapts to any handheld automatically
 
+## Screenshots
+
+<img src="screenshots/screenshot1.jpg" alt="Screenshot 1" width="250"/>
+<img src="screenshots/screenshot2.jpg" alt="Screenshot 2" width="250"/>
+<img src="screenshots/screenshot3.jpg" alt="Screenshot 3" width="250"/>
+<img src="screenshots/screenshot4.jpg" alt="Screenshot 4" width="250"/>
+
 ---
 
 ## Running
