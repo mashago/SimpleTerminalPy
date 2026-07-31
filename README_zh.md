@@ -46,6 +46,8 @@ python3 main.py [-scale 2.0] [-font font.ttf] [-fontsize 12]
 
 首次启动（或 `-reset-keymap`）会进入**按键校准向导**：
 
+<img src="screenshots/screenshot5.jpg" alt="按键校准" width="400"/>
+
 ```
         KEY SETUP
 

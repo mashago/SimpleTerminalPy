@@ -63,6 +63,8 @@ Both fonts are from Google's Android Open Source Project, licensed under **Apach
 
 On first launch (or with `-reset-keymap`), the **key calibration wizard** appears:
 
+<img src="screenshots/screenshot5.jpg" alt="Key Calibration" width="400"/>
+
 ```
         KEY SETUP
 
