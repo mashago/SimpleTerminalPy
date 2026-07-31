@@ -117,7 +117,10 @@ class Renderer:
 
         if self._pil_font is None:
             # 优先项目自带等宽字体，再尝试系统字体
+            # DejaVu Sans Mono 符号覆盖最全（─│❯▝▲●■→✓ 等），
+            # Droid Sans Mono 仅覆盖基础 Latin。
             fallbacks = [
+                os.path.join(_fonts_dir, "DejaVuSansMono.ttf"),
                 os.path.join(_fonts_dir, "DroidSansMono.ttf"),
                 "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
                 "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf",

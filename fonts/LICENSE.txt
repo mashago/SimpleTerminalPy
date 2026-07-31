@@ -1,6 +1,22 @@
 Font licenses
 =============
 
+DejaVuSansMono.ttf
+------------------
+Copyright (c) 2003 Bitstream, Inc.
+Copyright (c) 2006 Tavmjong Bah.
+All rights reserved.
+
+DejaVu fonts are based on the Bitstream Vera fonts, created by Bitstream,
+and are distributed under the Bitstream Vera License plus the DejaVu
+addendum (free license — redistribution permitted).
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the conditions of the license
+are met. Full license text:
+  https://dejavu-fonts.github.io/License.html
+  https://dejavu-fonts.github.io/Bitstream_Vera_license.txt
+
 DroidSansMono.ttf
 -----------------
 Copyright (C) 2008 The Android Open Source Project
@@ -11,7 +27,7 @@ DroidSansFallbackFull.ttf
 Copyright (C) 2008 The Android Open Source Project
 Licensed under the Apache License, Version 2.0.
 
-Both fonts are distributed under the Apache License, Version 2.0
+The Droid fonts are distributed under the Apache License, Version 2.0
 (http://www.apache.org/licenses/LICENSE-2.0).
 You may obtain a copy of the License at:
 
