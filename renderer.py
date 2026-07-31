@@ -8,6 +8,7 @@ update_render() 以及 font.c 的全部渲染逻辑。
 """
 
 import ctypes
+import os
 from collections import OrderedDict
 
 import sdl2
@@ -106,9 +107,14 @@ class Renderer:
             except OSError:
                 pass
 
+        # 项目自带字体目录（fonts/，Apache 2.0，来源明确）
+        _fonts_dir = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "fonts")
+
         if self._pil_font is None:
-            # 尝试常见等宽字体
+            # 优先项目自带等宽字体，再尝试系统字体
             fallbacks = [
+                os.path.join(_fonts_dir, "DroidSansMono.ttf"),
                 "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
                 "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf",
                 "/mnt/vendor/bin/default.ttf",
@@ -130,6 +136,13 @@ class Renderer:
         # CJK 回退字体（用于主字体不含的汉字）
         self._cjk_font = None
         cjk_fallbacks = [
+            # 项目自带 CJK 字体（Apache 2.0，来源明确）
+            os.path.join(_fonts_dir, "DroidSansFallbackFull.ttf"),
+            # 掌机固件自带（Anbernic 等，RgMenu 验证可用）
+            "/mnt/vendor/bin/default.ttf",
+            # 项目本地字体（用户可放入）
+            os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                         "font.ttf"),
             # Noto Sans CJK
             "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
             "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
@@ -151,7 +164,7 @@ class Renderer:
 
         print(f"Renderer: using font {self.font_path or 'default'}"
               f" ({self.font_size}px)"
-              f" cjk={'yes' if self._cjk_font else 'no'}")
+              f" cjk={self._cjk_font is not None}")
 
     # ══════════════════════════════════════════════════════
     # draw_frame — 主渲染入口
@@ -305,12 +318,17 @@ class Renderer:
         if img is not None:
             self._img.paste(img, (px, py), img)
 
-        # 下划线
+        # 下划线（画在基线下方 1px，不是格子底边）
         if underline:
             ul_w = self.char_w * width
+            font = self._pil_font_bold if bold else self._pil_font
+            if font is not None:
+                _, descent = font.getmetrics()
+                ul_y = py + self.char_h - descent + 1
+            else:
+                ul_y = py + self.char_h - 2
             self._draw.line(
-                (px, py + self.char_h - 1,
-                 px + ul_w - 1, py + self.char_h - 1),
+                (px, ul_y, px + ul_w - 1, ul_y),
                 fill=self._color_of(fg_idx), width=1)
 
     # ══════════════════════════════════════════════════════
@@ -366,12 +384,26 @@ class Renderer:
         img = Image.new("RGBA", (img_w, img_h), (0, 0, 0, 0))
         draw = ImageDraw.Draw(img)
 
-        # 居中绘制
         bbox = draw.textbbox((0, 0), ch, font=font)
         text_w = bbox[2] - bbox[0]
-        text_h = bbox[3] - bbox[1]
-        x_off = (img_w - text_w) // 2 - bbox[0]
-        y_off = (img_h - text_h) // 2 - bbox[1]
+
+        if width == 1:
+            # 等宽字符：左对齐绘制，字形起点固定
+            # （居中会导致窄字符 i 与宽字符 m 在格子里位置不同，
+            #   单词看起来左右参差 = 歪歪扭扭）
+            x_off = -bbox[0]
+        else:
+            # 宽字符（中文等方块字）：居中
+            x_off = (img_w - text_w) // 2 - bbox[0]
+
+        # 基线对齐（不垂直居中！）：
+        # PIL 的 draw.text((x, y)) 中基线 = y + ascent（与字符无关）。
+        # 固定基线在格子底部上方 descent 处（标准终端行为），
+        # 让 t/m/p/P 等不同高度的字符基线一致，不会高低错位。
+        # 注意：绝不能减 bbox[1]——每个字符 bbox 偏移不同，
+        # 减了会导致各字符基线错位（koook 中 o 偏上）。
+        ascent, descent = font.getmetrics()
+        y_off = img_h - (ascent + descent)
 
         draw.text((x_off, y_off), ch, fill=fg, font=font)
         return img
@@ -388,24 +420,28 @@ class Renderer:
 
         # 取当前光标位置的 glyph
         g = self.term.lines[cur.y][cur.x]
-        ch = g.c if g.state & GLYPH_SET else ' '
+        is_set = bool(g.state & GLYPH_SET)
+        ch = g.c if is_set else ' '
 
+        # 宽字符光标：按字符实际宽度绘制
+        ch_w = char_width(ch)
+        width = max(1, ch_w) if is_set else 1
+
+        # 反转色：背景=原前景色，字符用原背景色（否则同色不可见）
         if self._cursor_blink:
-            # 反转前景/背景色
-            fg_c = self._color_of(g.bg if g.state & GLYPH_SET else DEFAULT_BG)
-            bg_c = self._color_of(
-                g.fg if g.state & GLYPH_SET else DEFAULT_CS)
+            bg_c = self._color_of(g.fg if is_set else DEFAULT_CS)
+            fg_c = self._color_of(g.bg if is_set else DEFAULT_BG)
         else:
-            fg_c = self._color_of(
-                DEFAULT_BG if g.state & GLYPH_SET else DEFAULT_BG)
             bg_c = self._color_of(DEFAULT_CS)
+            fg_c = self._color_of(DEFAULT_BG)
 
         self._draw.rectangle(
-            (x, y, x + self.char_w, y + self.char_h), fill=bg_c)
+            (x, y, x + self.char_w * width, y + self.char_h), fill=bg_c)
 
-        # 画字符
+        # 画字符（反转时用原背景色，保证可见）
         if ch != ' ' and ch != '\0':
-            img = self._get_glyph_image(ch, g.fg, False)
+            char_fg = g.bg if (self._cursor_blink and is_set) else g.fg
+            img = self._get_glyph_image(ch, char_fg, False, width)
             if img:
                 self._img.paste(img, (x, y), img)
 

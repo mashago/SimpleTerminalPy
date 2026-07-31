@@ -9,7 +9,7 @@ A terminal emulator for embedded Linux handheld consoles, rewritten in **Python 
 - Interactive PTY shell (vim, top, htop, and more)
 - On-screen keyboard (OSK)
 - Scrollback buffer (256 lines)
-- CJK double-width rendering + CJK font fallback
+- CJK double-width rendering (bundled fonts, Apache 2.0)
 - **Key calibration wizard** — adapts to any handheld automatically
 
 ---
@@ -36,6 +36,21 @@ python3 main.py [-scale 2.0] [-font font.ttf] [-fontsize 12]
 **Dependencies**: `python3`, `pysdl2`, `Pillow` (SDL2 system libraries required)
 
 ---
+
+## Fonts
+
+Bundled fonts (no system font dependency):
+
+```
+fonts/
+├── DroidSansMono.ttf          # Monospace Latin (primary)
+├── DroidSansFallbackFull.ttf  # CJK (Chinese/Japanese/Korean)
+└── LICENSE.txt                # Apache License 2.0
+```
+
+Both fonts are from Google's Android Open Source Project, licensed under **Apache 2.0** — safe to redistribute. The renderer falls back to system fonts (DejaVu Sans Mono, device firmware fonts, etc.) if the bundled ones are missing.
+
+
 
 ## Key Calibration (first launch)
 
@@ -160,6 +175,10 @@ SimpleTerminalPy/
 ├── key_calibrate.py     # Key calibration wizard
 ├── platform_config.py   # Platform presets (kept for reference)
 ├── wcwidth.py           # Unicode East Asian Width
+├── fonts/               # Bundled fonts (Apache 2.0)
+│   ├── DroidSansMono.ttf
+│   ├── DroidSansFallbackFull.ttf
+│   └── LICENSE.txt
 ├── key_map.json         # Player calibration result (generated at runtime)
 ├── SimpleTerminalPy.sh  # Launcher script (put in APPS dir)
 └── sync_to_app.sh       # Sync-to-SD-card script
@@ -179,9 +198,9 @@ bash sync_to_app.sh
 
 ## Known Limitations
 
-- Chinese rendering depends on a CJK font on the device (auto-detects common paths; shows boxes if missing)
 - Color emoji not supported (reasonable trade-off for embedded terminals)
 - Possible brief frame drops on extreme full-screen refreshes (e.g. vim initial startup)
+- Bold/italic SGR attributes render without glyph variation (bold colors not brightened either)
 
 ## License
 

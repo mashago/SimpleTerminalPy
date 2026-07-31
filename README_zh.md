@@ -9,7 +9,7 @@
 - PTY 交互式 shell（vim / top / htop 等均可运行）
 - 屏幕虚拟键盘（OSK）
 - Scrollback 历史缓冲（256 行）
-- 中文双列宽显示 + CJK 字体回退
+- 中文双列宽显示（自带 CJK 字体，Apache 2.0）
 - 按键校准向导（自适应任何掌机）
 
 ---
@@ -143,6 +143,21 @@ python3 main.py [-scale 2.0] [-font font.ttf] [-fontsize 12]
 
 ---
 
+## 字体
+
+项目自带字体，不依赖设备固件字体：
+
+```
+fonts/
+├── DroidSansMono.ttf          # 英文等宽主字体
+├── DroidSansFallbackFull.ttf  # 中文 CJK 字体
+└── LICENSE.txt                # Apache License 2.0
+```
+
+两款字体均来自 Google Android 开源项目，**Apache 2.0 许可证**，可自由再分发。若自带字体缺失，渲染器会回退到系统字体（DejaVu Sans Mono、掌机固件字体等）。
+
+---
+
 ## 文件结构
 
 ```
@@ -158,6 +173,10 @@ SimpleTerminalPy/
 ├── key_calibrate.py     # 按键校准向导
 ├── platform_config.py   # 平台预设（保留备用）
 ├── wcwidth.py           # Unicode East Asian Width
+├── fonts/               # 自带字体（Apache 2.0）
+│   ├── DroidSansMono.ttf
+│   ├── DroidSansFallbackFull.ttf
+│   └── LICENSE.txt
 ├── key_map.json         # 玩家校准结果（运行时生成）
 ├── SimpleTerminalPy.sh  # 启动脚本（放 APPS 目录）
 └── sync_to_app.sh       # 同步到 SD 卡脚本
@@ -177,9 +196,9 @@ bash sync_to_app.sh
 
 ## 已知限制
 
-- 中文显示依赖设备上的 CJK 字体（自动检测常见路径，未找到则显示方框）
 - 彩色 Emoji 不支持（嵌入式终端合理取舍）
 - 极端全屏刷新（如 vim 首次启动）可能有短暂掉帧
+- 粗体/斜体 SGR 属性渲染无字形变化（粗体颜色也不亮化）
 
 ## 许可
 
