@@ -166,14 +166,17 @@ class OSK:
             return None
 
         # 普通字符 — 应用锁定的 Ctrl/Alt 修饰
-        result = label
+        # 注意：必须用 output（布局定义的实际输出），
+        # 不能是 label（显示标签）——⌫/↵/␣/↑ 等特殊键的
+        # label 是符号字形（如 U+232B），output 才是控制序列。
+        result = output
         if self.ctrl:
             ch = label[0].lower()
             if 'a' <= ch <= 'z':
                 result = chr(ord(ch) - ord('a') + 1)
             # Ctrl 锁定保持 — 由 R1 解锁
         elif self.alt:
-            result = "\033" + label
+            result = "\033" + output
             # Alt 锁定保持 — 由 R1 解锁
 
         # 单次 Shift（非锁定时打完一个自动回小写）

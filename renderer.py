@@ -79,6 +79,10 @@ class Renderer:
         self._cursor_blink = True
         self._cursor_reverse = False  # 用于显示闪烁
 
+        # 旧光标位置 — 画新光标前先恢复（C 版的 static oldx/oldy）
+        self._old_cx = 0
+        self._old_cy = 0
+
     # ══════════════════════════════════════════════════════
     # 初始化
     # ══════════════════════════════════════════════════════
@@ -413,37 +417,70 @@ class Renderer:
     # ══════════════════════════════════════════════════════
 
     def _draw_cursor(self):
-        """根据 blink 状态切换光标显隐。"""
+        """根据 blink 状态切换光标显隐。
+
+        画新光标前先恢复旧光标位置（从网格重画该格），
+        否则光标移动后旧位置的色块残留（C 版的 oldx/oldy）。
+        """
         cur = self.term.cursor
-        x = self.border_px + cur.x * self.char_w
-        y = self.border_px + cur.y * self.char_h
 
-        # 取当前光标位置的 glyph
-        g = self.term.lines[cur.y][cur.x]
-        is_set = bool(g.state & GLYPH_SET)
-        ch = g.c if is_set else ' '
+        # 恢复旧光标位置
+        if self._old_cx != cur.x or self._old_cy != cur.y:
+            self._restore_cell(self._old_cx, self._old_cy)
 
-        # 宽字符光标：按字符实际宽度绘制
-        ch_w = char_width(ch)
-        width = max(1, ch_w) if is_set else 1
+        # 画新光标（未隐藏时）
+        if not (cur.state & 1):   # CURSOR_HIDE
+            x = self.border_px + cur.x * self.char_w
+            y = self.border_px + cur.y * self.char_h
 
-        # 反转色：背景=原前景色，字符用原背景色（否则同色不可见）
-        if self._cursor_blink:
-            bg_c = self._color_of(g.fg if is_set else DEFAULT_CS)
-            fg_c = self._color_of(g.bg if is_set else DEFAULT_BG)
-        else:
-            bg_c = self._color_of(DEFAULT_CS)
-            fg_c = self._color_of(DEFAULT_BG)
+            # 取当前光标位置的 glyph
+            g = self.term.lines[cur.y][cur.x]
+            is_set = bool(g.state & GLYPH_SET)
+            ch = g.c if is_set else ' '
 
+            # 宽字符光标：按字符实际宽度绘制
+            ch_w = char_width(ch)
+            width = max(1, ch_w) if is_set else 1
+
+            # 反转色：背景=原前景色，字符用原背景色（否则同色不可见）
+            if self._cursor_blink:
+                bg_c = self._color_of(g.fg if is_set else DEFAULT_CS)
+            else:
+                bg_c = self._color_of(DEFAULT_CS)
+
+            self._draw.rectangle(
+                (x, y, x + self.char_w * width, y + self.char_h),
+                fill=bg_c)
+
+            # 画字符（反转时用原背景色，保证可见）
+            if ch != ' ' and ch != '\0':
+                char_fg = g.bg if (self._cursor_blink and is_set) else g.fg
+                img = self._get_glyph_image(ch, char_fg, False, width)
+                if img:
+                    self._img.paste(img, (x, y), img)
+
+        self._old_cx, self._old_cy = cur.x, cur.y
+
+    def _restore_cell(self, x: int, y: int):
+        """从网格重画指定格子（用于恢复旧光标位置）。"""
+        if not (0 <= x < self.term.col and 0 <= y < self.term.row):
+            return
+        g = self.term.lines[y][x]
+        px = self.border_px + x * self.char_w
+        py = self.border_px + y * self.char_h
+
+        # 背景
+        bg_c = self._color_of(g.bg if g.state & GLYPH_SET else DEFAULT_BG)
         self._draw.rectangle(
-            (x, y, x + self.char_w * width, y + self.char_h), fill=bg_c)
+            (px, py, px + self.char_w, py + self.char_h), fill=bg_c)
 
-        # 画字符（反转时用原背景色，保证可见）
-        if ch != ' ' and ch != '\0':
-            char_fg = g.bg if (self._cursor_blink and is_set) else g.fg
-            img = self._get_glyph_image(ch, char_fg, False, width)
+        # 字符（含宽字符）
+        if g.state & GLYPH_SET and g.c not in (' ', ''):
+            w = max(1, char_width(g.c))
+            bold = bool(g.mode & ATTR_BOLD)
+            img = self._get_glyph_image(g.c, g.fg, bold, w)
             if img:
-                self._img.paste(img, (x, y), img)
+                self._img.paste(img, (px, py), img)
 
     def toggle_blink(self):
         """切换 blink 状态。调用方应每 500ms 调用一次。"""
