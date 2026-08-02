@@ -39,9 +39,20 @@ opt_cmd: list[str] = []
 opt_term = None
 opt_platform = "rg34xxsp"
 
-# key_map.json 路径（与应用同目录）
-APP_DIR = os.path.dirname(os.path.abspath(__file__))
-KEYMAP_PATH = os.path.join(APP_DIR, "key_map.json")
+# key_map.json 路径（统一方案：三种模式行为一致）
+# - 源码模式: 代码所在目录（__file__）
+# - PyInstaller 打包 (onedir/onefile): 可执行文件真实目录（sys.executable），
+#   注意 onefile 的 __file__ 指向临时解压目录，写进去退出就丢
+# - 目录只读时回退到 ~/.simple_terminal_py
+if getattr(sys, "frozen", False):
+    _base = os.path.dirname(os.path.realpath(sys.executable))
+    if not os.access(_base, os.W_OK):
+        _base = os.path.join(os.path.expanduser("~"), ".simple_terminal_py")
+        os.makedirs(_base, exist_ok=True)
+    KEYMAP_PATH = os.path.join(_base, "key_map.json")
+else:
+    APP_DIR = os.path.dirname(os.path.abspath(__file__))
+    KEYMAP_PATH = os.path.join(APP_DIR, "key_map.json")
 
 
 def parse_args():
