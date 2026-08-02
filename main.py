@@ -27,7 +27,7 @@ from pty_handler import PtyHandler
 from renderer import Renderer
 from input_handler import InputHandler
 from osk import OSK
-from key_calibrate import KeyCalibrator, load_keymap
+from key_calibrate import KeyCalibrator, KeyHelpScreen, load_keymap
 
 # ── 全局选项 ────────────────────────────────────────────
 opt_scale = DEFAULT_SCALE
@@ -166,6 +166,11 @@ class SDLApp:
 
     def ensure_keymap(self) -> bool:
         """确保 key_map.json 存在。返回 False 表示用户放弃了校准。"""
+        # 先展示按键功能说明（3 列 16 行表格，按任意键继续）
+        help_screen = KeyHelpScreen(
+            self.renderer, self.screen_w, self.screen_h)
+        help_screen.run()
+
         if not os.path.exists(KEYMAP_PATH) or \
            "--reset-keymap" in sys.argv:
             print("No key_map.json — starting calibration...")
@@ -382,6 +387,13 @@ class SDLApp:
         sys.stderr.write(f"[KEY] {name} {'↓' if pressed else '↑'}\n")
         sys.stderr.flush()
 
+        # ── L1+R1 组合：删除 keymap 文件（下次启动重新校准） ──
+        if name in ("l1", "r1") and pressed:
+            other = "r1" if name == "l1" else "l1"
+            if self.input_handler.is_down(other):
+                self._delete_keymap()
+                return
+
         # ── 全局键（任何模式） ──
         if name == "menu":
             if pressed:
@@ -594,6 +606,17 @@ class SDLApp:
             sdl2.SDL_JoystickClose(self.joystick)
         sdl2.SDL_Quit()
         print(f"Goodbye! ({self._frame} frames)")
+
+    # ── L1+R1 组合：删除 keymap ───────────────────────
+
+    def _delete_keymap(self):
+        """删除 key_map.json — 下次启动重新校准（不退出，退出按 MENU）。"""
+        try:
+            os.remove(KEYMAP_PATH)
+            print(f"[KEYMAP] Deleted {KEYMAP_PATH} — "
+                  f"will re-calibrate on next start")
+        except OSError as e:
+            print(f"[KEYMAP] Failed to delete {KEYMAP_PATH}: {e}")
 
 
 # ── 入口 ─────────────────────────────────────────────────

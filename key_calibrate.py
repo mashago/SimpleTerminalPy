@@ -1,4 +1,4 @@
-"""SimpleTerminalPy — 按键校准向导。
+"""SimpleTerminalPy — 按键校准向导 + 按键功能说明。
 
 玩家第一次启动时，按提示依次按下掌机上的物理按键，
 程序记录每个按键对应的 (事件类型, 值)，保存为 key_map.json。
@@ -256,16 +256,19 @@ class KeyCalibrator:
                       font=self.font_big, fill=(255, 255, 100, 255),
                       anchor="mm")
 
-            # 已分配列表（兼容 2/3 元组）
-            y = self.height // 2 + 60
-            for name, spec in self.keymap.items():
-                t = spec[0]
-                v = spec[1]
-                draw.text((self.width // 2, y),
-                          f"{KEY_LABELS.get(name, name)} = {t}:{v}",
-                          font=self.font_mid, fill=(150, 150, 150, 255),
-                          anchor="mm")
-                y += 26
+            # 只显示上一个已分配的按键（第一个按键时不显示）
+            if self.current_idx > 0:
+                prev_name = CALIBRATE_KEYS[self.current_idx - 1]
+                prev_spec = self.keymap.get(prev_name)
+                if prev_spec is not None:
+                    t = prev_spec[0]
+                    v = prev_spec[1]
+                    draw.text((self.width // 2, self.height // 2 + 60),
+                              f"{KEY_LABELS.get(prev_name, prev_name)}"
+                              f" = {t}:{v}",
+                              font=self.font_mid,
+                              fill=(150, 150, 150, 255),
+                              anchor="mm")
 
         # 底部提示
         draw.text((self.width // 2, self.height - 30),
@@ -310,3 +313,118 @@ def load_keymap(path: str) -> dict | None:
         return result
     except (OSError, ValueError, KeyError, TypeError):
         return None
+
+
+# ── 按键功能说明 ──────────────────────────────────────────
+
+# 3 列 16 行表格：行=每个按键，列=OSK 开启/关闭时的效果
+KEY_GUIDE_ROWS = [
+    ("UP",     "move cursor",  "arrow up"),
+    ("DOWN",   "move cursor",  "arrow down"),
+    ("LEFT",   "move cursor",  "arrow left"),
+    ("RIGHT",  "move cursor",  "arrow right"),
+    ("A",      "press key",    "Enter"),
+    ("B",      "Backspace",    "Ctrl+C"),
+    ("X",      "hide OSK",     "show OSK"),
+    ("Y",      "move OSK",     "-"),
+    ("MENU",   "quit",         "quit"),
+    ("SELECT", "Tab",          "Tab"),
+    ("START",  "Enter",        "Enter"),
+    ("L1",     "shift",        "-"),
+    ("R1",     "sticky mod",   "-"),
+    ("L2",     "arrow left",   "scroll up"),
+    ("R2",     "arrow right",  "scroll down"),
+    ("L1+R1",  "delete keymap", "delete keymap"),
+]
+
+
+class KeyHelpScreen:
+    """按键功能说明画面 — 3 列 16 行表格，按任意键继续。"""
+
+    def __init__(self, renderer, width: int, height: int):
+        self.renderer = renderer
+        self.width = width
+        self.height = height
+
+        # 等宽字体（表格对齐）
+        try:
+            self.font = ImageFont.truetype(
+                "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf", 15)
+        except OSError:
+            self.font = ImageFont.load_default()
+
+    def run(self):
+        """展示说明画面，等待任意按键后返回。"""
+        while True:
+            if self._poll_any_key():
+                return
+            self._render()
+            time.sleep(0.016)
+
+    def _poll_any_key(self) -> bool:
+        """检测任意输入事件（按钮/方向/键盘/手柄）。"""
+        event = sdl2.SDL_Event()
+        while sdl2.SDL_PollEvent(event):
+            t = event.type
+            if t == sdl2.SDL_QUIT:
+                return True
+            if t == sdl2.SDL_JOYBUTTONDOWN:
+                return True
+            if t == sdl2.SDL_JOYHATMOTION and event.jhat.value != 0:
+                return True
+            if t == sdl2.SDL_KEYDOWN:
+                return True
+            if t == sdl2.SDL_CONTROLLERBUTTONDOWN:
+                return True
+        return False
+
+    def _render(self):
+        """渲染说明表格到 SDL。"""
+        img = Image.new("RGBA", (self.width, self.height), (10, 10, 20, 255))
+        draw = ImageDraw.Draw(img)
+
+        # 标题
+        draw.text((self.width // 2, 24), "KEY GUIDE",
+                  font=self.font, fill=(255, 255, 255, 255), anchor="mm")
+
+        # 表头
+        head_y = 52
+        draw.text((self.width // 2 - 240, head_y), "KEY",
+                  font=self.font, fill=(255, 255, 100, 255), anchor="mm")
+        draw.text((self.width // 2 - 40, head_y), "OSK ON",
+                  font=self.font, fill=(100, 255, 100, 255), anchor="mm")
+        draw.text((self.width // 2 + 210, head_y), "OSK OFF",
+                  font=self.font, fill=(100, 200, 255, 255), anchor="mm")
+
+        # 16 行按键（行高 22，为底部版权信息留空间）
+        row_y = head_y + 26
+        for key, on_desc, off_desc in KEY_GUIDE_ROWS:
+            draw.text((self.width // 2 - 240, row_y), key,
+                      font=self.font, fill=(255, 255, 255, 255), anchor="mm")
+            draw.text((self.width // 2 - 40, row_y), on_desc,
+                      font=self.font, fill=(200, 200, 200, 255), anchor="mm")
+            draw.text((self.width // 2 + 210, row_y), off_desc,
+                      font=self.font, fill=(200, 200, 200, 255), anchor="mm")
+            row_y += 22
+
+        # 版权信息（两行）
+        draw.text((self.width // 2, self.height - 38),
+                  "SimpleTerminalPy © 2026 Masha (MIT)",
+                  font=self.font, fill=(150, 150, 150, 255), anchor="mm")
+        draw.text((self.width // 2, self.height - 16),
+                  "based on SimpleTerminal (haoict) / benob",
+                  font=self.font, fill=(130, 130, 130, 255), anchor="mm")
+
+        # 上传显示
+        rgba = img.tobytes()
+        texture = sdl2.SDL_CreateTexture(
+            self.renderer,
+            sdl2.SDL_PIXELFORMAT_RGBA32,
+            sdl2.SDL_TEXTUREACCESS_STREAMING,
+            self.width, self.height,
+        )
+        sdl2.SDL_UpdateTexture(texture, None, rgba, self.width * 4)
+        sdl2.SDL_RenderClear(self.renderer)
+        sdl2.SDL_RenderCopy(self.renderer, texture, None, None)
+        sdl2.SDL_RenderPresent(self.renderer)
+        sdl2.SDL_DestroyTexture(texture)
