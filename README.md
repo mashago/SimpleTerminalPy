@@ -109,6 +109,7 @@ Results are saved to `key_map.json` (next to the program):
 | **MENU** | Quit program |
 | **X** | Show / hide OSK |
 | **Y** | Toggle OSK position (bottom / top) |
+| **L1 + R1** | Delete key_map.json (re-calibrate on next start) |
 
 ### When OSK is visible
 

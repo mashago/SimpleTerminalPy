@@ -92,6 +92,7 @@ python3 main.py [-scale 2.0] [-font font.ttf] [-fontsize 12]
 | **MENU** | 退出程序 |
 | **X** | 显示 / 隐藏 OSK |
 | **Y** | 切换 OSK 位置（底部 / 顶部） |
+| **L1 + R1** | 删除 key_map.json（下次启动重新校准） |
 
 ### OSK 显示时（虚拟键盘可见）
 
