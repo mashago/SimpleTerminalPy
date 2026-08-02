@@ -14,6 +14,11 @@ command_history.json
 *~
 4913
 
+# ── PyInstaller 构建产物 ───────────────────────────────
+build/
+dist/
+*.spec
+
 # ── 系统文件 ───────────────────────────────────────────
 .DS_Store
 Thumbs.db

@@ -17,6 +17,8 @@ import time
 import sdl2
 from PIL import Image, ImageDraw, ImageFont
 
+from config import VERSION
+
 # ── 校准顺序 ────────────────────────────────────────────
 CALIBRATE_KEYS = [
     "up", "down", "left", "right",
@@ -407,9 +409,9 @@ class KeyHelpScreen:
                       font=self.font, fill=(200, 200, 200, 255), anchor="mm")
             row_y += 22
 
-        # 版权信息（两行）
+        # 版权信息（两行，版本号从 config.VERSION 读取）
         draw.text((self.width // 2, self.height - 38),
-                  "SimpleTerminalPy © 2026 Masha (MIT)",
+                  f"SimpleTerminalPy v{VERSION} © 2026 Masha (MIT)",
                   font=self.font, fill=(150, 150, 150, 255), anchor="mm")
         draw.text((self.width // 2, self.height - 16),
                   "based on SimpleTerminal (haoict) / benob",
