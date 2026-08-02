@@ -180,15 +180,22 @@ SimpleTerminalPy/
 ├── renderer.py          # PIL dirty-line incremental renderer + glyph LRU cache
 ├── osk.py               # On-screen keyboard
 ├── input_handler.py     # Event (type, value, device) → logical key
-├── key_calibrate.py     # Key calibration wizard
+├── key_calibrate.py     # Key calibration wizard + key guide screen
 ├── wcwidth.py           # Unicode East Asian Width
 ├── fonts/               # Bundled fonts (Apache 2.0)
-│   ├── DroidSansMono.ttf
-│   ├── DroidSansFallbackFull.ttf
+│   ├── DejaVuSansMono.ttf        # Monospace primary (symbols)
+│   ├── DroidSansMono.ttf         # Monospace fallback
+│   ├── DroidSansFallbackFull.ttf # CJK
 │   └── LICENSE.txt
+├── screenshots/         # README screenshots
+├── tests/               # unittest suite (33 tests)
+│   └── test_simple_terminal_py.py
 ├── key_map.json         # Player calibration result (generated at runtime)
-├── SimpleTerminalPy.sh  # Launcher script (put in APPS dir)
-└── sync_to_app.sh       # Sync-to-SD-card script
+├── SimpleTerminalPy-Raw.sh  # Source launcher (rename to SimpleTerminalPy.sh in APPS)
+├── SimpleTerminalPy-Bin.sh  # Binary launcher (bundled into release package)
+├── build_release.sh     # PyInstaller onedir packaging script
+├── sync_raw_to_app.sh   # Sync source code to SD card
+└── sync_bin_to_app.sh   # Sync binary package to SD card
 ```
 
 ---
@@ -196,9 +203,12 @@ SimpleTerminalPy/
 ## Syncing to the Console
 
 ```bash
-# Sync code to /mnt/sdcard/Roms/APPS/SimpleTerminalPy
+# Sync source code to /mnt/sdcard/Roms/APPS/SimpleTerminalPy
 # Automatically clears __pycache__ and key_map.json (re-calibrate on next start)
-bash sync_to_app.sh
+bash sync_raw_to_app.sh
+
+# Sync the packaged binary instead (requires build_release.sh first)
+bash sync_bin_to_app.sh
 ```
 
 ---

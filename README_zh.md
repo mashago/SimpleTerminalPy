@@ -178,15 +178,22 @@ SimpleTerminalPy/
 ├── renderer.py          # PIL 脏行增量渲染 + 字形 LRU 缓存
 ├── osk.py               # 屏幕虚拟键盘
 ├── input_handler.py     # 事件 (type, value, device) → 逻辑键
-├── key_calibrate.py     # 按键校准向导
+├── key_calibrate.py     # 按键校准向导 + 按键说明界面
 ├── wcwidth.py           # Unicode East Asian Width
 ├── fonts/               # 自带字体（Apache 2.0）
-│   ├── DroidSansMono.ttf
-│   ├── DroidSansFallbackFull.ttf
+│   ├── DejaVuSansMono.ttf        # 英文等宽主字体（符号覆盖全）
+│   ├── DroidSansMono.ttf         # 英文等宽回退
+│   ├── DroidSansFallbackFull.ttf # 中文 CJK
 │   └── LICENSE.txt
+├── screenshots/         # README 截图
+├── tests/               # unittest 测试套件（33 个）
+│   └── test_simple_terminal_py.py
 ├── key_map.json         # 玩家校准结果（运行时生成）
-├── SimpleTerminalPy.sh  # 启动脚本（放 APPS 目录）
-└── sync_to_app.sh       # 同步到 SD 卡脚本
+├── SimpleTerminalPy-Raw.sh  # 源码版启动脚本（部署时改名 SimpleTerminalPy.sh）
+├── SimpleTerminalPy-Bin.sh  # 二进制版启动脚本（打进 release 包）
+├── build_release.sh     # PyInstaller onedir 打包脚本
+├── sync_raw_to_app.sh   # 同步源码到 SD 卡
+└── sync_bin_to_app.sh   # 同步二进制包到 SD 卡
 ```
 
 ---
@@ -194,9 +201,12 @@ SimpleTerminalPy/
 ## 同步到掌机
 
 ```bash
-# 将代码同步到 /mnt/sdcard/Roms/APPS/SimpleTerminalPy
+# 同步源码到 /mnt/sdcard/Roms/APPS/SimpleTerminalPy
 # 自动清理 __pycache__ 和 key_map.json（下次启动重新校准）
-bash sync_to_app.sh
+bash sync_raw_to_app.sh
+
+# 同步打包的二进制版（需先运行 build_release.sh）
+bash sync_bin_to_app.sh
 ```
 
 ---
