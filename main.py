@@ -13,6 +13,7 @@ import argparse
 import ctypes
 import os
 import sys
+import threading
 
 import sdl2
 import sdl2.ext
@@ -223,9 +224,14 @@ class SDLApp:
             cmd_list=opt_cmd,
         )
 
+        # 终端状态锁 — 保护 term 网格不被 PTY 线程和渲染线程并发访问
+        # （t_scroll_up 的滚动是非原子交换，并发渲染会读到中间态导致画面闪烁）
+        self.term_lock = threading.Lock()
+
         def on_pty_data(text: str):
-            for ch in text:
-                self.vt100.t_putc(ch)
+            with self.term_lock:
+                for ch in text:
+                    self.vt100.t_putc(ch)
             self.needs_redraw = True
 
         def on_child_exit():
@@ -277,13 +283,14 @@ class SDLApp:
             # 长按重复（方向键等）
             self._check_button_repeat(now)
 
-            # 渲染
+            # 渲染（持终端锁 — 与 PTY 线程的 VT100 处理互斥）
             if self.needs_redraw and self.term_renderer:
                 osk_img = (self.osk.render() if self.osk and
                            self.osk.active else None)
                 osk_top = (self.osk.location_bottom is False
                            if self.osk else False)
-                self.term_renderer.draw_frame(osk_img, osk_top)
+                with self.term_lock:
+                    self.term_renderer.draw_frame(osk_img, osk_top)
                 self.needs_redraw = False
                 self._frame += 1
 

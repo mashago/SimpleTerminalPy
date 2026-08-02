@@ -180,31 +180,44 @@ class Renderer:
 
         osk_top: OSK 固定在顶部（True）还是底部（False）。
         画布在帧间保持，不清除。只重绘变动的行。
+        上传时只更新变化的像素区域（局部上传），大幅降低 CPU 开销。
         """
         term = self.term
+
+        # 脏行范围（像素区域）
+        dirty_top = term.row      # 终端行号范围
+        dirty_bot = -1
 
         # 只处理脏行
         for y in range(term.row):
             if not term.dirty[y]:
                 continue
             term.dirty[y] = False
+            dirty_top = min(dirty_top, y)
+            dirty_bot = max(dirty_bot, y)
             self._draw_dirty_line(y)
 
-        # 光标（仅非滚动状态）
+        # 光标（仅非滚动状态）—— 旧/新位置都算入更新区域
         if term.scroll_offset == 0 and \
            not (term.cursor.state & 1):  # CURSOR_HIDE
+            dirty_top = min(dirty_top, self._old_cy, term.cursor.y)
+            dirty_bot = max(dirty_bot, self._old_cy, term.cursor.y)
             self._draw_cursor()
 
-        # scrollbar 指示器
+        # scrollbar 指示器（第一行区域）
         if term.scroll_offset > 0:
+            dirty_top = min(dirty_top, 0)
+            dirty_bot = max(dirty_bot, 0)
             self._draw_scroll_indicator()
 
         # 清空 terminal grid 下方的区域（OSK 旧画面残留）
+        # 注意：绘制后必须纳入 dirty 范围，否则局部上传不会更新这段区域
         term_bottom = self.border_px + term.row * self.char_h
         if term_bottom < self.height:
             self._draw.rectangle(
                 (0, term_bottom, self.width, self.height),
                 fill=self._color_of(DEFAULT_BG))
+            dirty_bot = max(dirty_bot, term.row)   # 覆盖 grid 外区域到底部
 
         # 合成 OSK（顶部或底部）
         if osk_surface:
@@ -214,9 +227,12 @@ class Renderer:
             else:
                 osk_y = self.height - osk_h
             self._img.paste(osk_surface, (0, osk_y), osk_surface)
+            # OSK 区域纳入更新
+            dirty_top = min(dirty_top, (osk_y - self.border_px) // self.char_h)
+            dirty_bot = max(dirty_bot, (osk_y + osk_h - 1 - self.border_px) // self.char_h)
 
-        # 上传纹理
-        self._flush()
+        # 上传纹理（局部区域）
+        self._flush(dirty_top, dirty_bot)
 
     # ══════════════════════════════════════════════════════
     # 脏行绘制
@@ -232,7 +248,7 @@ class Renderer:
             if 0 <= sb_idx < len(term.scrollback):
                 line = term.scrollback[sb_idx]
             else:
-                line = term.lines[y]
+                return  # scrollback 历史不足 — 显示空行（背景已清）
         else:
             screen_y = y - term.scroll_offset
             if 0 <= screen_y < term.row:
@@ -241,11 +257,10 @@ class Renderer:
                 return
 
         # 先清空整行背景（否则残留上一帧的画面）
-        px_clear = self.border_px
+        # 全宽清除（含左右 border）— OSK 等全宽合成物可能覆盖 border 区域
         py_clear = self.border_px + y * self.char_h
-        pw_clear = term.col * self.char_w
         self._draw.rectangle(
-            (px_clear, py_clear, px_clear + pw_clear, py_clear + self.char_h),
+            (0, py_clear, self.width, py_clear + self.char_h),
             fill=self._color_of(DEFAULT_BG))
 
         # 合并同属性相邻格，批量绘制
@@ -510,26 +525,49 @@ class Renderer:
     # 上传纹理
     # ══════════════════════════════════════════════════════
 
-    def _flush(self):
-        """PIL 画布 → RGBA bytes → SDL_UpdateTexture → RenderCopy → Present"""
-        # 旋转处理
-        if self.opt_rotate == 90:
-            display = self._img.rotate(90, expand=True)
-        elif self.opt_rotate == 270:
-            display = self._img.rotate(270, expand=True)
-        elif self.opt_rotate == 180:
-            display = self._img.rotate(180, expand=False)
+    def _flush(self, dirty_row_top: int = 0, dirty_row_bot: int = -1):
+        """PIL 画布 → RGBA bytes → SDL_UpdateTexture → RenderCopy → Present
+
+        dirty_row_top/bot: 终端行号范围，只更新该像素区域。
+        无脏行（只有光标 blink）时区域很小，大幅降低上传开销。
+        """
+        # 旋转时区域变换复杂，回退全屏上传
+        rotated = self.opt_rotate != 0
+        if rotated:
+            dirty_row_top, dirty_row_bot = 0, -1
+
+        # 计算像素区域
+        if dirty_row_bot >= dirty_row_top:
+            y0 = self.border_px + max(0, dirty_row_top) * self.char_h
+            y1 = min(self.height, self.border_px +
+                     (dirty_row_bot + 1) * self.char_h)
+            y0 = max(0, y0)
         else:
-            display = self._img
+            y0, y1 = 0, self.height
 
-        dw, dh = display.size
-        rgba = display.tobytes()
+        if rotated:
+            if self.opt_rotate == 90:
+                display = self._img.rotate(90, expand=True)
+            elif self.opt_rotate == 270:
+                display = self._img.rotate(270, expand=True)
+            else:
+                display = self._img.rotate(180, expand=False)
+            dw, dh = display.size
+            rgba = display.tobytes()
+            if dw != self._tex_w or dh != self._tex_h:
+                self._recreate_texture(dw, dh)
+            sdl2.SDL_UpdateTexture(self._texture, None, rgba, dw * 4)
+        else:
+            # 局部区域上传：只转脏区域的像素
+            dw, dh = self.width, self.height
+            if dw != self._tex_w or dh != self._tex_h:
+                self._recreate_texture(dw, dh)
+            if y1 > y0:
+                crop = self._img.crop((0, y0, dw, y1))
+                rgba = crop.tobytes()
+                rect = sdl2.SDL_Rect(0, y0, dw, y1 - y0)
+                sdl2.SDL_UpdateTexture(self._texture, rect, rgba, dw * 4)
 
-        # 如果尺寸变化，重建纹理
-        if dw != self._tex_w or dh != self._tex_h:
-            self._recreate_texture(dw, dh)
-
-        sdl2.SDL_UpdateTexture(self._texture, None, rgba, dw * 4)
         sdl2.SDL_RenderClear(self.sdl_renderer)
         sdl2.SDL_RenderCopy(self.sdl_renderer, self._texture, None, None)
         sdl2.SDL_RenderPresent(self.sdl_renderer)

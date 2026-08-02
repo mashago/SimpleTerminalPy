@@ -91,8 +91,9 @@ class OSK:
         self.key_gap = 2
         self.margin = 4
 
-        # 颜色
-        self.COLOR_BG = (40, 40, 50, 220)
+        # 颜色（背景不透明 — 半透明 paste 会透出底下内容导致颜色不均，
+        # 且残留 alpha 混合值影响关闭后的覆盖）
+        self.COLOR_BG = (40, 40, 50, 255)
         self.COLOR_KEY = (60, 60, 75, 255)
         self.COLOR_SEL = (70, 130, 180, 255)
         self.COLOR_LOCKED = (50, 120, 255, 255)
