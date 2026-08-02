@@ -7,7 +7,6 @@ update_render() 以及 font.c 的全部渲染逻辑。
 内部可切换到 SDL blit 而不影响其他模块。
 """
 
-import ctypes
 import os
 from collections import OrderedDict
 
@@ -16,9 +15,9 @@ from PIL import Image, ImageDraw, ImageFont
 
 from terminal import (
     Term, Glyph, GLYPH_SET, GLYPH_WIDE_TAIL,
-    ATTR_BOLD, ATTR_REVERSE, ATTR_UNDERLINE, ATTR_ITALIC, ATTR_BLINK,
+    ATTR_BOLD, ATTR_UNDERLINE,
 )
-from config import COLORMAP, DEFAULT_FG, DEFAULT_BG, DEFAULT_CS, DEFAULT_UCS
+from config import COLORMAP, DEFAULT_FG, DEFAULT_BG, DEFAULT_CS
 from wcwidth import char_width
 
 
@@ -39,8 +38,7 @@ class Renderer:
                  border_px: int = 2,
                  font_path: str | None = None,
                  font_size: int = 12,
-                 opt_rotate: int = 0,
-                 opt_scale: float = 1.0):
+                 opt_rotate: int = 0):
         self.term = term
         self.sdl_renderer = renderer
         self.width = width
@@ -49,7 +47,6 @@ class Renderer:
         self.char_h = char_h
         self.border_px = border_px
         self.opt_rotate = opt_rotate
-        self.opt_scale = opt_scale
 
         # PIL 画布
         self._img = Image.new("RGBA", (width, height), color=(0, 0, 0, 255))
@@ -264,10 +261,6 @@ class Renderer:
             if not glyph.state & GLYPH_SET:
                 x += 1
                 continue
-
-            # 确定宽度
-            ch_w = char_width(glyph.c)
-            display_w = 1 if ch_w <= 1 else ch_w
 
             base_attr = (glyph.fg, glyph.bg, glyph.mode)
             batch_start = x
@@ -501,7 +494,6 @@ class Renderer:
 
         # 背景
         bg = self._color_of(DEFAULT_CS)
-        fg = self._color_of(DEFAULT_BG)
         self._draw.rectangle(
             (px - 2, py - 1,
              px + len(text) * self.char_w + 4,

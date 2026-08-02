@@ -18,7 +18,6 @@ import sdl2
 import sdl2.ext
 
 from config import (
-    INITIAL_WIDTH, INITIAL_HEIGHT, DEFAULT_SCALE,
     DEFAULT_SHELL, BUTTON_HELD_DELAY,
 )
 from terminal import Term
@@ -30,14 +29,11 @@ from osk import OSK
 from key_calibrate import KeyCalibrator, KeyHelpScreen, load_keymap
 
 # ── 全局选项 ────────────────────────────────────────────
-opt_scale = DEFAULT_SCALE
 opt_rotate = 0
 opt_font = None
 opt_fontsize = 12
-opt_fontshade = 0
 opt_cmd: list[str] = []
 opt_term = None
-opt_platform = "rg34xxsp"
 
 # key_map.json 路径（统一方案：三种模式行为一致）
 # - 源码模式: 代码所在目录（__file__）
@@ -56,34 +52,26 @@ else:
 
 
 def parse_args():
-    global opt_scale, opt_rotate, opt_font, opt_fontsize, opt_fontshade
-    global opt_cmd, opt_term, opt_platform
+    global opt_rotate, opt_font, opt_fontsize
+    global opt_cmd, opt_term
 
     p = argparse.ArgumentParser(
         description="SimpleTerminalPy — 嵌入式终端模拟器")
-    p.add_argument("-scale", type=float, default=DEFAULT_SCALE)
     p.add_argument("-font", type=str, default=None)
     p.add_argument("-fontsize", type=int, default=12)
-    p.add_argument("-fontshade", type=int, default=0)
     p.add_argument("-rotate", type=int, default=0,
                    choices=[0, 90, 180, 270])
     p.add_argument("-term", type=str, default=None)
-    p.add_argument("-platform", type=str, default="rg34xxsp",
-                   help="平台(仅用于默认布局): rg34xxsp, r36s, rg35xxsp, rgb30, h700, pi")
     p.add_argument("-reset-keymap", action="store_true",
                    help="忽略已有 key_map.json，重新校准")
     p.add_argument("-r", nargs="*", default=[], dest="cmd")
-    p.add_argument("-q", action="store_true")
     args = p.parse_args()
 
-    opt_scale = args.scale
     opt_rotate = args.rotate
     opt_font = args.font
     opt_fontsize = args.fontsize
-    opt_fontshade = args.fontshade
     opt_cmd = args.cmd or []
     opt_term = args.term
-    opt_platform = args.platform
     return args
 
 
@@ -130,16 +118,7 @@ class SDLApp:
             raise RuntimeError(
                 f"SDL_Init: {sdl2.SDL_GetError().decode()}")
 
-        dm = sdl2.SDL_DisplayMode()
-        if sdl2.SDL_GetCurrentDisplayMode(0, dm) != 0:
-            self.screen_w = int(INITIAL_WIDTH * opt_scale)
-            self.screen_h = int(INITIAL_HEIGHT * opt_scale)
-        else:
-            self.screen_w = dm.w
-            self.screen_h = dm.h
-
-        print(f"Screen: {self.screen_w}x{self.screen_h} scale={opt_scale}")
-
+        # 创建全屏窗口（FULLSCREEN_DESKTOP 模式下尺寸参数被忽略，传 0,0）
         self.window = sdl2.SDL_CreateWindow(
             b"SimpleTerminalPy",
             sdl2.SDL_WINDOWPOS_UNDEFINED,
@@ -150,6 +129,13 @@ class SDLApp:
         if not self.window:
             raise RuntimeError(
                 f"SDL_CreateWindow: {sdl2.SDL_GetError().decode()}")
+
+        # 创建后查询实际窗口尺寸（全屏窗口 = 屏幕尺寸，单一可靠来源）
+        ww, wh = ctypes.c_int(), ctypes.c_int()
+        sdl2.SDL_GetWindowSize(self.window, ctypes.byref(ww), ctypes.byref(wh))
+        self.screen_w, self.screen_h = ww.value, wh.value
+
+        print(f"Screen: {self.screen_w}x{self.screen_h}")
 
         self.renderer = sdl2.SDL_CreateRenderer(
             self.window, -1, sdl2.SDL_RENDERER_ACCELERATED)
@@ -228,7 +214,6 @@ class SDLApp:
             font_path=font_path,
             font_size=opt_fontsize,
             opt_rotate=opt_rotate,
-            opt_scale=opt_scale,
         )
 
         # PTY
@@ -462,7 +447,6 @@ class SDLApp:
         """OSK 活跃时的动作。"""
         osk = self.osk
         pty = self.pty
-        term = self.term
         if osk is None or pty is None:
             return
 
@@ -633,7 +617,7 @@ class SDLApp:
 # ── 入口 ─────────────────────────────────────────────────
 
 def main():
-    args = parse_args()
+    parse_args()
 
     app = SDLApp()
     try:

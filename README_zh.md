@@ -34,10 +34,8 @@ python3 main.py
 python3 main.py -reset-keymap
 
 # 命令行参数
-python3 main.py [-scale 2.0] [-font font.ttf] [-fontsize 12]
-                [-fontshade 0|1|2] [-rotate 0|90|180|270]
-                [-term xterm-256color] [-platform rg34xxsp]
-                [-r "command"] [-q]
+python3 main.py [-font font.ttf] [-fontsize 12] [-rotate 0|90|180|270]
+                [-term xterm-256color] [-reset-keymap] [-r "command"]
 ```
 
 ---
@@ -181,7 +179,6 @@ SimpleTerminalPy/
 ├── osk.py               # 屏幕虚拟键盘
 ├── input_handler.py     # 事件 (type, value, device) → 逻辑键
 ├── key_calibrate.py     # 按键校准向导
-├── platform_config.py   # 平台预设（保留备用）
 ├── wcwidth.py           # Unicode East Asian Width
 ├── fonts/               # 自带字体（Apache 2.0）
 │   ├── DroidSansMono.ttf

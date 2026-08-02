@@ -34,10 +34,8 @@ python3 main.py
 python3 main.py -reset-keymap
 
 # Command line options
-python3 main.py [-scale 2.0] [-font font.ttf] [-fontsize 12]
-                [-fontshade 0|1|2] [-rotate 0|90|180|270]
-                [-term xterm-256color] [-platform rg34xxsp]
-                [-r "command"] [-q]
+python3 main.py [-font font.ttf] [-fontsize 12] [-rotate 0|90|180|270]
+                [-term xterm-256color] [-reset-keymap] [-r "command"]
 ```
 
 **Dependencies**: `python3`, `pysdl2`, `Pillow` (SDL2 system libraries required)
@@ -183,7 +181,6 @@ SimpleTerminalPy/
 ├── osk.py               # On-screen keyboard
 ├── input_handler.py     # Event (type, value, device) → logical key
 ├── key_calibrate.py     # Key calibration wizard
-├── platform_config.py   # Platform presets (kept for reference)
 ├── wcwidth.py           # Unicode East Asian Width
 ├── fonts/               # Bundled fonts (Apache 2.0)
 │   ├── DroidSansMono.ttf

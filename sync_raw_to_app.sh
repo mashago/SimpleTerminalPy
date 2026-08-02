@@ -14,12 +14,14 @@ mkdir -p "$TARGET"
   cd "$SOURCE"
   find . -type d -name '.git'       -prune -o \
           -type d -name '__pycache__' -prune -o \
+          -type d -name 'build'      -prune -o \
+          -type d -name 'dist'       -prune -o \
           -type f -name '*.pyc'       -prune -o \
+          -type f -name '*.spec'      -prune -o \
           -type f -name '*.swp'       -prune -o \
           -type f -name '*.swo'       -prune -o \
           -type f -name '*~'          -prune -o \
-          -type f -name 'sync_to_app.sh' -prune -o \
-          -type f -name 'SimpleTerminalPy.sh' -prune -o \
+          -type f -name '*.sh'        -prune -o \
           -type d -exec mkdir -p "$TARGET/{}" \; \
                    -exec chmod 755 "$TARGET/{}" \; \
           -o \
@@ -31,8 +33,8 @@ echo "==> 清理 __pycache__ / key_map.json"
 rm -rf "$TARGET/__pycache__"
 rm -f "$TARGET/key_map.json"
 
-echo "==> 复制启动脚本: $SOURCE/SimpleTerminalPy.sh → /mnt/sdcard/Roms/APPS/"
-cp "$SOURCE/SimpleTerminalPy.sh" /mnt/sdcard/Roms/APPS/
+echo "==> 复制启动脚本: $SOURCE/SimpleTerminalPy-Raw.sh → /mnt/sdcard/Roms/APPS/SimpleTerminalPy.sh"
+cp "$SOURCE/SimpleTerminalPy-Raw.sh" /mnt/sdcard/Roms/APPS/SimpleTerminalPy.sh
 chmod 755 /mnt/sdcard/Roms/APPS/SimpleTerminalPy.sh
 
 echo "==> 完成"

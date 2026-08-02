@@ -5,4 +5,4 @@ export PYSDL2_DLL_PATH="/usr/lib"
 export PYTHONUNBUFFERED=1
 export PYTHONDONTWRITEBYTECODE=1
 rm -rf "${progdir}/SimpleTerminalPy/__pycache__"
-python3 -uB "${progdir}/SimpleTerminalPy/main.py" -platform rg34xxsp > "${progdir}/SimpleTerminalPy/log.txt" 2>&1
+python3 -uB "${progdir}/SimpleTerminalPy/main.py" > "${progdir}/SimpleTerminalPy/log.txt" 2>&1

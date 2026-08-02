@@ -2,19 +2,19 @@
 
 from terminal import (
     Term, Glyph, Cursor, CSIEscape, STREscape,
-    ATTR_NULL, ATTR_REVERSE, ATTR_UNDERLINE, ATTR_BOLD,
+    ATTR_REVERSE, ATTR_UNDERLINE, ATTR_BOLD,
     ATTR_GFX, ATTR_ITALIC, ATTR_BLINK,
-    CURSOR_DEFAULT, CURSOR_HIDE, CURSOR_WRAPNEXT,
-    GLYPH_SET, GLYPH_DIRTY, GLYPH_WIDE_TAIL,
+    CURSOR_HIDE, CURSOR_WRAPNEXT,
+    GLYPH_SET, GLYPH_WIDE_TAIL,
     MODE_WRAP, MODE_INSERT, MODE_APPKEYPAD, MODE_ALTSCREEN,
-    MODE_CRLF, MODE_MOUSEBTN, MODE_MOUSEMOTION, MODE_MOUSE,
+    MODE_CRLF, MODE_MOUSEBTN, MODE_MOUSEMOTION,
     MODE_REVERSE, MODE_KBDLOCK,
     ESC_START, ESC_CSI, ESC_STR, ESC_ALTCHARSET, ESC_STR_END, ESC_TEST,
-    UTF_SIZ, ESC_BUF_SIZ, ESC_ARG_SIZ, STR_BUF_SIZ, STR_ARG_SIZ,
+    UTF_SIZ, ESC_BUF_SIZ, ESC_ARG_SIZ, STR_BUF_SIZ,
     limit, between, is_set,
 )
 from wcwidth import char_width
-from config import DEFAULT_FG, DEFAULT_BG, COLORMAP
+from config import DEFAULT_FG, DEFAULT_BG, TAB_SPACES
 
 # ── VT102 标识 ──────────────────────────────────────────
 VT102ID = "\033[?6c"
@@ -903,8 +903,6 @@ class Vt100:
         if col < 1 or row < 1:
             return False
 
-        minrow = min(row, self.term.row)
-        mincol = min(col, self.term.col)
         slide = self.term.cursor.y - row + 1
 
         # 释放超出新行数的行

@@ -15,8 +15,6 @@
 
 import sdl2
 
-from key_calibrate import CALIBRATE_KEYS
-
 
 class InputHandler:
     """统一处理 SDL 输入事件，根据 OSK 状态分发。

@@ -13,8 +13,6 @@ import select
 import signal
 import threading
 
-import sdl2
-
 from config import DEFAULT_SHELL
 
 
