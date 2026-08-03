@@ -92,7 +92,7 @@ Results are saved to `key_map.json` (next to the program):
 ```
 
 - `type`: `btn` (joystick button) / `hat` (D-pad) / `key` (keyboard channel) / `cbtn` (game controller)
-- `device`: source device ID — must match for the key channel, **preventing conflicts with Bluetooth keyboards**
+- `device`: source device ID. Handheld channels (`btn`/`hat`/`cbtn`) record the real joystick device ID. The `key` channel uses a fixed `KBD_DEVICE` constant — SDL2 keyboard events carry no device ID, so key-channel buttons can't be distinguished from a Bluetooth keyboard by device
 
 ---
 
@@ -140,12 +140,12 @@ Results are saved to `key_map.json` (next to the program):
 |-----|----------|
 | Letters / digits / symbols | Normal input (IME composition via SDL_TEXTINPUT) |
 | Arrows / Home / End / PageUp / PageDown / F1-F12 | Standard escape sequences |
-| Ctrl + letter | Control characters (Ctrl+C, Ctrl+D, etc.) |
+| Ctrl + letter / symbol | Control characters (Ctrl+C, Ctrl+D, Ctrl+\ = 0x1C, Ctrl+Space, etc.) |
 | Tab / Shift+Tab | Tab / reverse tab |
 | Enter / Alt+Enter | Return / ESC+Return |
 | Ctrl+Shift+V | Paste from clipboard |
 
-> Bluetooth keyboards are isolated from handheld buttons: a key channel event only maps to a handheld button when its device ID matches calibration.
+> Handheld buttons are isolated from Bluetooth keyboards by event type: `btn`/`hat`/`cbtn` come from the joystick device and never collide with keyboard events. The `key` channel shares SDL keyboard events with any attached keyboard (SDL2 provides no per-keyboard device ID), which only matters if a handheld button was calibrated on the key channel.
 
 ---
 

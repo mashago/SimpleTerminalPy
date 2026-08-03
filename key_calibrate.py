@@ -17,7 +17,7 @@ import time
 import sdl2
 from PIL import Image, ImageDraw, ImageFont
 
-from config import VERSION
+from config import VERSION, KBD_DEVICE
 
 # ── 校准顺序 ────────────────────────────────────────────
 CALIBRATE_KEYS = [
@@ -121,10 +121,11 @@ class KeyCalibrator:
                            sdl2.SDLK_LALT, sdl2.SDLK_RALT,
                            sdl2.SDLK_CAPSLOCK):
                     continue
-                self._on_press(("key", sym, event.key.which), now)
+                # SDL2 键盘事件无 which 字段，key 通道用固定设备 ID
+                self._on_press(("key", sym, KBD_DEVICE), now)
             elif etype == sdl2.SDL_KEYUP:
                 self._on_release(("key", event.key.keysym.sym,
-                                  event.key.which), now)
+                                  KBD_DEVICE), now)
 
             elif etype == sdl2.SDL_CONTROLLERBUTTONDOWN:
                 self._on_press(("cbtn", event.cbutton.button,
@@ -310,7 +311,11 @@ def load_keymap(path: str) -> dict | None:
         for name, spec in keys.items():
             t = spec["type"]
             v = spec["value"]
-            d = spec.get("device", -1)   # 旧格式没有 device → -1（不匹配任何设备）
+            d = spec.get("device", -1)   # 旧格式没有 device → -1
+            # key 通道统一归一为 KBD_DEVICE（旧校准存的真实 which 值
+            # 在 SDL2 键盘事件中不存在，且无法区分设备）
+            if t == "key":
+                d = KBD_DEVICE
             result[name] = (t, v, d)
         return result
     except (OSError, ValueError, KeyError, TypeError):

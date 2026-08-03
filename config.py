@@ -16,6 +16,12 @@ BORDER_PX = 2
 # ── 按键长按延迟（毫秒）─────────────────────────────────
 BUTTON_HELD_DELAY = 150
 
+# ── key 通道（键盘事件）的固定设备 ID ───────────────────
+# SDL2 的 SDL_KeyboardEvent 没有 which/deviceID 字段（SDL3 才有），
+# 无法区分外接键盘和掌机按键。用固定负数标记 key 通道，
+# 避开真实设备 ID（SDL 从 0 开始）。
+KBD_DEVICE = -2
+
 # ── 默认色值索引 ───────────────────────────────────────
 DEFAULT_FG = 7
 DEFAULT_BG = 0

@@ -19,7 +19,7 @@ import sdl2
 import sdl2.ext
 
 from config import (
-    DEFAULT_SHELL, BUTTON_HELD_DELAY,
+    DEFAULT_SHELL, BUTTON_HELD_DELAY, KBD_DEVICE,
 )
 from terminal import Term
 from vt100 import Vt100
@@ -307,15 +307,23 @@ class SDLApp:
             self.running = False
 
         elif etype == sdl2.SDL_KEYDOWN:
-            # 检查是否掌机按键（键盘通道，须匹配设备 ID）
-            if self._keymap_owns_key(event.key.keysym.sym,
-                                     event.key.which):
+            # 检查是否掌机按键（键盘通道）
+            # SDL2 的 SDL_KeyboardEvent 没有 which 字段（SDL3 才有），
+            # key 通道使用固定设备 ID（KBD_DEVICE）取代
+            if self._keymap_owns_key(event.key.keysym.sym, KBD_DEVICE):
                 self._on_game_event("key", event.key.keysym.sym,
-                                    event.key.which, True)
+                                    KBD_DEVICE, True)
             else:
                 self._on_keydown(event.key)
 
         elif etype == sdl2.SDL_TEXTINPUT:
+            # 按住 Ctrl 时丢弃 TEXTINPUT —— Ctrl+字母是控制字符，
+            # 由 KEYDOWN 路径发送（\x03 等）。某些 SDL 构建/键盘布局
+            # 在 Ctrl 组合下仍报 TEXTINPUT，会导致同时发出控制字符和
+            # 普通字符（终端乱输入、Ctrl+C 失效）。
+            mod = sdl2.SDL_GetModState()
+            if mod & (sdl2.KMOD_LCTRL | sdl2.KMOD_RCTRL):
+                return
             text = event.text.text.decode('utf-8', errors='replace')
             if self.pty:
                 self.pty.write(text)
@@ -348,7 +356,7 @@ class SDLApp:
             pass
 
     def _keymap_owns_key(self, sym: int, device: int) -> bool:
-        """判断该键盘事件是否已被校准映射为掌机按键（须匹配设备）。"""
+        """判断该键盘事件是否已被校准映射为掌机按键。"""
         return self.input_handler is not None and \
             self.input_handler.resolve("key", sym, device) is not None
 
@@ -541,6 +549,25 @@ class SDLApp:
 
     _NON_PRINTING: dict[int, str] = InputHandler.NON_PRINTING_KEYS
 
+    # Ctrl+符号键 → ASCII 控制字符（标准映射）
+    # tmux prefix Ctrl+\ = 0x1C；Ctrl+Space = 0x00（emacs 等）
+    _CTRL_SYMBOL_MAP: dict[int, str] = {
+        sdl2.SDLK_SPACE:          "\x00",   # Ctrl+Space / Ctrl+@
+        sdl2.SDLK_2:              "\x00",   # Ctrl+2 == Ctrl+@
+        sdl2.SDLK_LEFTBRACKET:    "\x1b",   # Ctrl+[ == ESC
+        sdl2.SDLK_3:              "\x1b",   # Ctrl+3 == Ctrl+[
+        sdl2.SDLK_BACKSLASH:      "\x1c",   # Ctrl+\  (tmux prefix)
+        sdl2.SDLK_4:              "\x1c",   # Ctrl+4 == Ctrl+\
+        sdl2.SDLK_RIGHTBRACKET:   "\x1d",   # Ctrl+]
+        sdl2.SDLK_5:              "\x1d",   # Ctrl+5 == Ctrl+]
+        sdl2.SDLK_CARET:          "\x1e",   # Ctrl+^
+        sdl2.SDLK_6:              "\x1e",   # Ctrl+6 == Ctrl+^
+        sdl2.SDLK_UNDERSCORE:     "\x1f",   # Ctrl+_
+        sdl2.SDLK_7:              "\x1f",   # Ctrl+7 == Ctrl+_
+        sdl2.SDLK_MINUS:          "\x1f",   # Ctrl+-
+        sdl2.SDLK_SLASH:          "\x1f",   # Ctrl+/
+    }
+
     def _on_keydown(self, key):
         sym = key.keysym.sym
         mod = key.keysym.mod
@@ -585,11 +612,20 @@ class SDLApp:
                 self.pty.write("\177")
             return
 
-        # Ctrl+字母
+        # Ctrl 组合键
         if ctrl and not (mod & sdl2.KMOD_ALT):
+            # Ctrl+字母 → 控制字符 0x01-0x1A（Ctrl+A..Z）
             if sdl2.SDLK_a <= sym <= sdl2.SDLK_z:
                 if self.pty:
                     self.pty.write(chr(sym - sdl2.SDLK_a + 1))
+                return
+            # Ctrl+符号键 → 标准 ASCII 控制字符
+            # （tmux prefix Ctrl+\ = 0x1C 等；C 版只处理 a-z，
+            #   外接键盘场景必须补全）
+            seq = self._CTRL_SYMBOL_MAP.get(sym)
+            if seq is not None:
+                if self.pty:
+                    self.pty.write(seq)
                 return
 
     # ── 清理 ──────────────────────────────────────────

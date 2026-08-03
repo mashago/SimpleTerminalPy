@@ -20,11 +20,14 @@ import sys
 import tempfile
 import unittest
 
+import sdl2
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from terminal import Term, GLYPH_SET, GLYPH_WIDE_TAIL, MODE_WRAP
+from terminal import Term, GLYPH_SET, GLYPH_WIDE_TAIL
 from vt100 import Vt100
 from wcwidth import char_width
+from config import KBD_DEVICE
 from key_calibrate import KeyCalibrator, load_keymap, KEY_GUIDE_ROWS
 from input_handler import InputHandler
 from osk import OSK
@@ -203,7 +206,8 @@ class TestKeyCalibrate(unittest.TestCase):
         os.close(fd)
         try:
             cal.keymap_path = path
-            cal.keymap = {'up': ('hat', 1, 0), 'x': ('key', 307, 1)}
+            cal.keymap = {'up': ('hat', 1, 0),
+                          'x': ('key', 307, KBD_DEVICE)}
             cal._save()
             loaded = load_keymap(path)
             self.assertEqual(loaded, cal.keymap)
@@ -302,6 +306,82 @@ class TestOSK(unittest.TestCase):
         self.assertIsNot(img_lower, img_upper)  # 缓存失效
         self.osk.shift_up()
         self.assertEqual(self.osk.mode, 'lower')
+
+
+# ── 键盘 Ctrl 组合键（_on_keydown） ──────────────────────
+
+class TestCtrlKeys(unittest.TestCase):
+    """覆盖 _on_keydown 的 Ctrl 组合路径。
+
+    防回归：曾因漏写 self. 前缀导致 Ctrl+\\ 触发 NameError 崩溃
+    （pyflakes 能查到，但测试也应覆盖）。
+    """
+
+    class _FakePty:
+        def __init__(self):
+            self.written = []
+        def write(self, s):
+            self.written.append(s)
+
+    def _make_app(self):
+        import main as main_mod
+        app = main_mod.SDLApp.__new__(main_mod.SDLApp)
+        app.pty = self._FakePty()
+        return app
+
+    @staticmethod
+    def _make_key(sym, mod):
+        """构造模拟 SDL_KeyboardEvent.key。"""
+        class KS:
+            def __init__(self, s, m):
+                self.sym = s
+                self.mod = m
+        class K:
+            def __init__(self, s, m):
+                self.keysym = KS(s, m)
+        return K(sym, mod)
+
+    def test_ctrl_backslash(self):
+        """tmux prefix: Ctrl+\\ → \\x1c。曾 NameError 崩溃。"""
+        app = self._make_app()
+        app._on_keydown(self._make_key(sdl2.SDLK_BACKSLASH,
+                                       sdl2.KMOD_LCTRL))
+        self.assertEqual(app.pty.written, ['\x1c'])
+
+    def test_ctrl_bracket(self):
+        app = self._make_app()
+        app._on_keydown(self._make_key(sdl2.SDLK_LEFTBRACKET,
+                                       sdl2.KMOD_LCTRL))
+        self.assertEqual(app.pty.written, ['\x1b'])
+
+    def test_ctrl_space(self):
+        app = self._make_app()
+        app._on_keydown(self._make_key(sdl2.SDLK_SPACE,
+                                       sdl2.KMOD_LCTRL))
+        self.assertEqual(app.pty.written, ['\x00'])
+
+    def test_ctrl_c(self):
+        """Ctrl+C → \\x03。"""
+        app = self._make_app()
+        app._on_keydown(self._make_key(sdl2.SDLK_c,
+                                       sdl2.KMOD_LCTRL))
+        self.assertEqual(app.pty.written, ['\x03'])
+
+    def test_plain_c_no_ctrl(self):
+        """无 Ctrl 的普通键：KEYDOWN 路径不发送（走 TEXTINPUT）。"""
+        app = self._make_app()
+        app._on_keydown(self._make_key(sdl2.SDLK_c, 0))
+        self.assertEqual(app.pty.written, [])
+
+    def test_all_ctrl_symbol_map(self):
+        """映射表所有条目都能正常处理（防漏 self. 类属性错误）。"""
+        import main as main_mod
+        app = self._make_app()
+        for sym in main_mod.SDLApp._CTRL_SYMBOL_MAP:
+            app.pty.written.clear()
+            app._on_keydown(self._make_key(sym, sdl2.KMOD_LCTRL))
+            self.assertEqual(len(app.pty.written), 1,
+                             f'sym={sym} 未发送')
 
 
 # ── key_map.json 路径 ───────────────────────────────────

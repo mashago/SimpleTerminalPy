@@ -80,6 +80,16 @@ class PtyHandler:
             os.environ.pop("LINES", None)
             os.environ.pop("TERMCAP", None)  # type: ignore
 
+            # 确保 HOME 并进入用户主目录
+            # （C 版 exec_sh 有 chdir(getenv("HOME")) —
+            #   掌机菜单环境可能没有 HOME 且 cwd 为 /）
+            home = os.environ.get("HOME") or os.path.expanduser("~") or "/"
+            os.environ["HOME"] = home
+            try:
+                os.chdir(home)
+            except OSError:
+                pass
+
             # 补全 PATH — 从掌机菜单等精简环境启动时，
             # 常见用户路径（nvm node bin、~/.local/bin 等）可能缺失，
             # 导致 claude 等用户工具找不到。

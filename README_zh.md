@@ -75,7 +75,7 @@ python3 main.py [-font font.ttf] [-fontsize 12] [-rotate 0|90|180|270]
 ```
 
 - `type`: `btn`（手柄按钮）/ `hat`（D-Pad）/ `key`（键盘通道）/ `cbtn`（GameController）
-- `device`: 来源设备 ID —— key 通道必须匹配，**避免蓝牙键盘同键码冲突**
+- `device`: 来源设备 ID。手柄通道（`btn`/`hat`/`cbtn`）记录真实摇杆设备 ID；`key` 通道使用固定 `KBD_DEVICE` 常量——SDL2 键盘事件不携带设备 ID，key 通道按键无法按设备与外接键盘区分
 
 ---
 
@@ -123,12 +123,12 @@ python3 main.py [-font font.ttf] [-fontsize 12] [-rotate 0|90|180|270]
 |------|------|
 | 字母 / 数字 / 符号 | 正常输入（IME 组合文本经 SDL_TEXTINPUT） |
 | 方向键 / Home / End / PageUp / PageDown / F1-F12 | 标准转义序列 |
-| Ctrl + 字母 | 控制字符（Ctrl+C / Ctrl+D 等） |
+| Ctrl + 字母/符号 | 控制字符（Ctrl+C / Ctrl+D / Ctrl+\ = 0x1C / Ctrl+Space 等） |
 | Tab / Shift+Tab | Tab / 反向 Tab |
 | Enter / Alt+Enter | 回车 / ESC+回车 |
 | Ctrl+Shift+V | 剪贴板粘贴 |
 
-> 蓝牙键盘与掌机按键隔离：key 通道的设备 ID 不匹配时不会被当作掌机键。
+> 掌机按键与蓝牙键盘按事件类型隔离：`btn`/`hat`/`cbtn` 来自手柄设备，与键盘事件天然不冲突。`key` 通道与任何外接键盘共享 SDL 键盘事件（SDL2 无逐键盘设备 ID）——仅当掌机按键被校准为 key 通道时才可能冲突。
 
 ---
 
