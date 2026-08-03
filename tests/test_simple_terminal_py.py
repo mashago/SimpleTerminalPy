@@ -97,6 +97,28 @@ class TestVt100(unittest.TestCase):
         for ch in '\033c':
             self.vt.t_putc(ch)
 
+    def test_sgr_empty_param_resets(self):
+        """ESC[m（无参数 SGR 0）应重置属性。
+
+        回归测试：vim 大量使用 \x1b[m 简写，曾因空参数解析为
+        narg=0 而空转，导致白底属性残留（vim 可视选择/status line）。
+        """
+        for ch in '\033[47m':   # 白背景
+            self.vt.t_putc(ch)
+        self.vt.t_putc('X')
+        self.assertEqual(self.t.lines[0][0].bg, 7)
+        for ch in '\033[m':     # SGR 0 简写 → 重置
+            self.vt.t_putc(ch)
+        self.vt.t_putc('Y')
+        self.assertEqual(self.t.lines[0][1].bg, 260)   # 默认背景
+
+    def test_decsgn_gfx_chars(self):
+        """DEC Special Graphics (ESC(0) 完整映射。"""
+        for ch in '\033(0lqwqk':
+            self.vt.t_putc(ch)
+        line = ''.join(g.c for g in self.t.lines[0][:5])
+        self.assertEqual(line, '┌─┬─┐')
+
 
 # ── 宽字符 ──────────────────────────────────────────────
 

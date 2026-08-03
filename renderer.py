@@ -15,7 +15,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from terminal import (
     Term, Glyph, GLYPH_SET, GLYPH_WIDE_TAIL,
-    ATTR_BOLD, ATTR_UNDERLINE,
+    ATTR_BOLD, ATTR_UNDERLINE, ATTR_REVERSE,
 )
 from config import COLORMAP, DEFAULT_FG, DEFAULT_BG, DEFAULT_CS
 from wcwidth import char_width
@@ -293,8 +293,10 @@ class Renderer:
 
             batch_end = x
 
-            # 画背景
-            bg_color = self._color_of(base_attr[1])
+            # 画背景（reverse 时前景/背景交换：背景画 fg 色）
+            bg_color = self._color_of(
+                base_attr[0] if base_attr[2] & ATTR_REVERSE
+                else base_attr[1])
             px = self.border_px + batch_start * self.char_w
             py = self.border_px + y * self.char_h
             pw = (batch_end - batch_start) * self.char_w
@@ -321,9 +323,21 @@ class Renderer:
         if not c or c == ' ':
             return
 
-        fg_idx = glyph.fg
+        # reverse 时交换前景/背景（vim 可视选择等）
+        reverse = bool(glyph.mode & ATTR_REVERSE)
+        fg_idx = glyph.bg if reverse else glyph.fg
         bold = bool(glyph.mode & ATTR_BOLD)
         underline = bool(glyph.mode & ATTR_UNDERLINE)
+
+        # 粗体颜色亮化（C 版 x_draws 行为，对齐 mintty 的 Bold 色）：
+        # bold 时 0-7 基本色 → +8 亮色，256 色立方 → +36，灰度 → +4
+        if bold:
+            if 0 <= fg_idx <= 7:
+                fg_idx += 8
+            elif 16 <= fg_idx <= 195:
+                fg_idx += 36
+            elif 232 <= fg_idx <= 251:
+                fg_idx += 4
 
         px = self.border_px + x * self.char_w
         py = self.border_px + y * self.char_h
@@ -453,9 +467,15 @@ class Renderer:
             ch_w = char_width(ch)
             width = max(1, ch_w) if is_set else 1
 
-            # 反转色：背景=原前景色，字符用原背景色（否则同色不可见）
+            # reverse 感知：光标块颜色用"当前显示色"（交换后的前景）
+            # 而非原始 fg——否则光标在 vim 高亮行上颜色错乱
+            reverse = bool(g.mode & ATTR_REVERSE)
+            disp_fg = g.bg if reverse else g.fg
+            disp_bg = g.fg if reverse else g.bg
+
+            # 反转色：背景=显示前景色，字符用显示背景色（否则同色不可见）
             if self._cursor_blink:
-                bg_c = self._color_of(g.fg if is_set else DEFAULT_CS)
+                bg_c = self._color_of(disp_fg if is_set else DEFAULT_CS)
             else:
                 bg_c = self._color_of(DEFAULT_CS)
 
@@ -463,9 +483,10 @@ class Renderer:
                 (x, y, x + self.char_w * width, y + self.char_h),
                 fill=bg_c)
 
-            # 画字符（反转时用原背景色，保证可见）
+            # 画字符（反转时用显示背景色，保证可见）
             if ch != ' ' and ch != '\0':
-                char_fg = g.bg if (self._cursor_blink and is_set) else g.fg
+                char_fg = disp_bg if (self._cursor_blink and is_set) \
+                    else disp_fg
                 img = self._get_glyph_image(ch, char_fg, False, width)
                 if img:
                     self._img.paste(img, (x, y), img)
@@ -480,16 +501,28 @@ class Renderer:
         px = self.border_px + x * self.char_w
         py = self.border_px + y * self.char_h
 
-        # 背景
-        bg_c = self._color_of(g.bg if g.state & GLYPH_SET else DEFAULT_BG)
+        # 背景（reverse 时交换：背景画 fg 色）——
+        # 必须与 _draw_dirty_line 一致，否则光标恢复和绘制不同色
+        is_set = bool(g.state & GLYPH_SET)
+        reverse = bool(g.mode & ATTR_REVERSE)
+        bg_idx = (g.fg if reverse else g.bg) if is_set else DEFAULT_BG
+        bg_c = self._color_of(bg_idx)
         self._draw.rectangle(
             (px, py, px + self.char_w, py + self.char_h), fill=bg_c)
 
-        # 字符（含宽字符）
-        if g.state & GLYPH_SET and g.c not in (' ', ''):
+        # 字符（含宽字符）——reverse + bold 亮化与 _draw_glyph_at 一致
+        if is_set and g.c not in (' ', ''):
             w = max(1, char_width(g.c))
             bold = bool(g.mode & ATTR_BOLD)
-            img = self._get_glyph_image(g.c, g.fg, bold, w)
+            fg_idx = g.bg if reverse else g.fg
+            if bold:
+                if 0 <= fg_idx <= 7:
+                    fg_idx += 8
+                elif 16 <= fg_idx <= 195:
+                    fg_idx += 36
+                elif 232 <= fg_idx <= 251:
+                    fg_idx += 4
+            img = self._get_glyph_image(g.c, fg_idx, bold, w)
             if img:
                 self._img.paste(img, (px, py), img)
 

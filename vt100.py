@@ -20,13 +20,18 @@ from config import DEFAULT_FG, DEFAULT_BG, TAB_SPACES
 VT102ID = "\033[?6c"
 
 
-# ── VT100 图形字符映射 ──────────────────────────────────
+# ── VT100 图形字符映射（完整 62 字符表，来自 C 版 rxvt 表）──
+# DEC Special Graphics (ESC(0)：字符 'A'-'~' 的映射
 _VT100_GFX = {
-    # 0x41-0x7e 的图形映射（rxvt 表）
+    'A': '↑', 'B': '↓', 'C': '→', 'D': '←', 'E': '█', 'F': '▚',
+    'G': '☃',
+    # H-O: 保留
+    '`': '◆', 'a': '▒', 'b': '␉', 'c': '␌', 'd': '␍', 'e': '␊',
+    'f': '°', 'g': '±', 'h': '␤', 'i': '␋',
     'j': '┘', 'k': '┐', 'l': '┌', 'm': '└', 'n': '┼',
-    'q': '─', 't': '├', 'u': '┤', 'v': '┴', 'w': '┬',
-    'x': '│',
-    # 通过 t_set_char 的 c[0]-0x41 索引还可以映射更多
+    'o': '⎺', 'p': '⎻', 'q': '─', 'r': '⎼', 's': '⎽',
+    't': '├', 'u': '┤', 'v': '┴', 'w': '┬', 'x': '│',
+    'y': '≤', 'z': '≥', '{': 'π', '|': '≠', '}': '£', '~': '·',
 }
 
 
@@ -272,10 +277,15 @@ class Vt100:
                 has_digit = False
             else:
                 # 终止字符 — 保存最后一个参数和模式
+                # 与 C 版一致：无参数时默认 arg[0]=0, narg=1
+                # （\x1b[m 等价 \x1b[0m = SGR 0 重置；vim 大量使用）
                 if seq.narg < ESC_ARG_SIZ:
                     if has_digit or seq.narg > 0 or ch != buf[0]:
                         seq.arg[seq.narg] = current_num
                         seq.narg += 1
+                    else:
+                        seq.arg[0] = 0
+                        seq.narg = 1
                 seq.mode = ch
                 return
             p += 1
@@ -782,7 +792,8 @@ class Vt100:
             old = self.term.mode
             self._modbit(set_, MODE_REVERSE)
             if old != self.term.mode:
-                pass  # C 版会调 redraw() — 这里由调用方处理
+                # 等价 C 版的 redraw()：全屏重绘让反视频立即生效
+                self.term.full_dirt()
         elif a == 7:            # DECAWM — 自动换行
             self._modbit(set_, MODE_WRAP)
         elif a == 25:           # 光标显示/隐藏

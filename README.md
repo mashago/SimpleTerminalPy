@@ -217,7 +217,7 @@ bash sync_bin_to_app.sh
 
 - Color emoji not supported (reasonable trade-off for embedded terminals)
 - Possible brief frame drops on extreme full-screen refreshes (e.g. vim initial startup)
-- Bold/italic SGR attributes render without glyph variation (bold colors not brightened either)
+- Bold/italic SGR attributes render without glyph variation (bold colors are brightened, matching the C version)
 
 ## License
 
