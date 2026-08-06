@@ -6,6 +6,8 @@ A terminal emulator for embedded Linux handheld consoles, rewritten in **Python 
 
 - Full VT100 escape sequence parser (30+ CSI commands)
 - 256 colors + SGR attributes (bold / underline / reverse / blink)
+- 24-bit truecolor (38;2/48;2) exact RGB rendering
+- Bracketed paste (DEC 2004) — safe multi-line paste in vim/bash/tmux
 - Interactive PTY shell (vim, top, htop, and more)
 - On-screen keyboard (OSK)
 - Scrollback buffer (256 lines)
@@ -188,7 +190,7 @@ SimpleTerminalPy/
 │   ├── DroidSansFallbackFull.ttf # CJK
 │   └── LICENSE.txt
 ├── screenshots/         # README screenshots
-├── tests/               # unittest suite (44 tests)
+├── tests/               # unittest suite (64 tests)
 │   └── test_simple_terminal_py.py
 ├── key_map.json         # Player calibration result (generated at runtime)
 ├── SimpleTerminalPy-Raw.sh  # Source launcher (rename to SimpleTerminalPy.sh in APPS)

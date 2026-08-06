@@ -8,7 +8,7 @@ from terminal import (
     GLYPH_SET, GLYPH_WIDE_TAIL,
     MODE_WRAP, MODE_INSERT, MODE_APPKEYPAD, MODE_ALTSCREEN,
     MODE_CRLF, MODE_MOUSEBTN, MODE_MOUSEMOTION,
-    MODE_REVERSE, MODE_KBDLOCK,
+    MODE_REVERSE, MODE_KBDLOCK, MODE_BRACKETPASTE,
     ESC_START, ESC_CSI, ESC_STR, ESC_ALTCHARSET, ESC_STR_END, ESC_TEST,
     UTF_SIZ, ESC_BUF_SIZ, ESC_ARG_SIZ, STR_BUF_SIZ,
     limit, between, is_set,
@@ -554,7 +554,10 @@ class Vt100:
         g.mode = attr.mode
         g.fg = attr.fg
         g.bg = attr.bg
-        g.state |= GLYPH_SET
+        # 覆盖宽字符尾格时必须清除 WIDE_TAIL 标记——
+        # 否则 renderer 把该格当尾格跳过，显示为空白
+        # （tmux 重绘覆盖宽字符区域后文字交替消失的根因）
+        g.state = (g.state | GLYPH_SET) & ~GLYPH_WIDE_TAIL
 
     def _t_clear_region(self, x1: int, y1: int, x2: int, y2: int):
         """清除矩形区域。含 WIDE_TAIL 处理。"""
@@ -749,7 +752,8 @@ class Vt100:
 
     def _sgr_color(self, args: list[int], i: int, narg: int,
                    fg: bool) -> int:
-        """处理 SGR 38;5;N 或 48;5;N 扩展色。返回更新后的索引 i。"""
+        """处理 SGR 38;5;N / 48;5;N 扩展色或 38;2;R;G;B / 48;2 真彩色。
+        返回更新后的索引 i。"""
         if i + 2 < narg and args[i + 1] == 5:
             # 256 色模式: 38;5;N
             color_idx = args[i + 2]
@@ -760,13 +764,15 @@ class Vt100:
                     self.term.cursor.attr.bg = color_idx
             return i + 2
         elif i + 4 < narg and args[i + 1] == 2:
-            # RGB 模式: 38;2;R;G;B — 简化：取 R 分量
-            r = args[i + 2]
-            if between(r, 0, 255):
+            # RGB 模式: 38;2;R;G;B — 存真彩色元组 (R,G,B)，
+            # renderer 直接使用，粗体不做亮化（C 版只取 R 分量，
+            # 这里是超越原版）
+            rgb = (args[i + 2], args[i + 3], args[i + 4])
+            if all(between(c, 0, 255) for c in rgb):
                 if fg:
-                    self.term.cursor.attr.fg = r
+                    self.term.cursor.attr.fg = rgb
                 else:
-                    self.term.cursor.attr.bg = r
+                    self.term.cursor.attr.bg = rgb
             return i + 4
         return i
 
@@ -824,7 +830,9 @@ class Vt100:
                     self._t_swap_screen()
         elif a == 1048:         # 仅光标保存/恢复
             self.t_cursor(self.CURSOR_SAVE if set_ else self.CURSOR_LOAD)
-        # 其他模式（3, 4, 6, 8, 12, 69, 2004, 1006, 1015）— 忽略
+        elif a == 2004:         # xterm bracketed paste — 括号粘贴
+            self._modbit(set_, MODE_BRACKETPASTE)
+        # 其他模式（3, 4, 6, 8, 12, 69, 1006, 1015）— 忽略
 
     def _set_std_mode(self, a: int, set_: bool):
         """标准模式（非私有）。"""

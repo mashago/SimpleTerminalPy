@@ -6,6 +6,8 @@
 
 - 完整 VT100 转义序列解析（30+ CSI 命令）
 - 256 色 + SGR 属性（粗体/下划线/反显/闪烁）
+- 24 位真彩色（38;2/48;2 精确 RGB）
+- 括号粘贴（DEC 2004）——vim/bash/tmux 中多行粘贴安全
 - PTY 交互式 shell（vim / top / htop 等均可运行）
 - 屏幕虚拟键盘（OSK）
 - Scrollback 历史缓冲（256 行）
@@ -186,7 +188,7 @@ SimpleTerminalPy/
 │   ├── DroidSansFallbackFull.ttf # 中文 CJK
 │   └── LICENSE.txt
 ├── screenshots/         # README 截图
-├── tests/               # unittest 测试套件（44 个）
+├── tests/               # unittest 测试套件（64 个）
 │   └── test_simple_terminal_py.py
 ├── key_map.json         # 玩家校准结果（运行时生成）
 ├── SimpleTerminalPy-Raw.sh  # 源码版启动脚本（部署时改名 SimpleTerminalPy.sh）

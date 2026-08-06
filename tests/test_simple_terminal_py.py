@@ -12,6 +12,9 @@
   - OSK 渲染缓存与特殊键输出
   - key_map.json 路径（源码/frozen/只读回退）
   - 字符宽度
+  - 括号粘贴（DEC 2004：模式位 + 200~/201~ 包裹）
+  - 真彩色（38;2;R;G;B）解析与渲染（粗体不亮化）
+  - PTY 增量 UTF-8 解码（跨 read 块重组）
   - 渲染器光标恢复（宽字符残影 / 下划线 / 格子矩形 1px 溢出）
 """
 
@@ -30,13 +33,15 @@ from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from terminal import Term, GLYPH_SET, GLYPH_WIDE_TAIL
+from terminal import Term, GLYPH_SET, GLYPH_WIDE_TAIL, MODE_BRACKETPASTE
 from vt100 import Vt100
 from wcwidth import char_width
-from config import KBD_DEVICE
+from config import KBD_DEVICE, DEFAULT_FG, COLORMAP
 from key_calibrate import KeyCalibrator, load_keymap, KEY_GUIDE_ROWS
+from main import bracket_paste
 from input_handler import InputHandler
 from osk import OSK
+from pty_handler import PtyHandler
 from renderer import Renderer
 
 
@@ -156,6 +161,99 @@ class TestWideChars(unittest.TestCase):
             vt.t_putc(ch)
         vt.t_putc('中')        # 宽字符 → 换行
         self.assertEqual(t.cursor.y, 1)
+
+    def test_overwrite_wide_tail_clears_flag(self):
+        """普通字符覆盖宽字符尾格时必须清除 WIDE_TAIL 标记。
+
+        （tmux 重绘覆盖宽字符区域后文字交替消失的根因——
+        残留标记会让 renderer 跳过该格显示为空白）
+        """
+        t = Term(80, 24)
+        vt = Vt100(t)
+        vt.tty_write = lambda s: None
+        for ch in '你你你你':   # heads 0,2,4,6 / tails 1,3,5,7
+            vt.t_putc(ch)
+        vt.t_move_to(7, 0)      # 覆盖 col7（'你' 在 6-7 的尾格）
+        vt.t_putc('X')
+        g = t.lines[0][7]
+        self.assertEqual(g.c, 'X')
+        self.assertTrue(g.state & GLYPH_SET)
+        self.assertFalse(g.state & GLYPH_WIDE_TAIL)
+
+
+# ── 真彩色（38;2;R;G;B） ────────────────────────────────
+
+class TestTrueColor(unittest.TestCase):
+    def setUp(self):
+        self.t = Term(80, 24)
+        self.vt = Vt100(self.t)
+        self.vt.tty_write = lambda s: None
+
+    def _feed(self, s: str):
+        for ch in s:
+            self.vt.t_putc(ch)
+
+    def test_truecolor_fg(self):
+        self._feed("\x1b[38;2;255;0;0m")
+        self.assertEqual(self.t.cursor.attr.fg, (255, 0, 0))
+
+    def test_truecolor_bg(self):
+        self._feed("\x1b[48;2;0;128;255m")
+        self.assertEqual(self.t.cursor.attr.bg, (0, 128, 255))
+
+    def test_truecolor_invalid_component_ignored(self):
+        # 任一分量越界则整条忽略，保持原色
+        self._feed("\x1b[38;2;300;0;0m")
+        self.assertEqual(self.t.cursor.attr.fg, DEFAULT_FG)
+        self.assertIsInstance(self.t.cursor.attr.fg, int)
+
+    def test_truecolor_reset_by_sgr0(self):
+        self._feed("\x1b[38;2;1;2;3m\x1b[0m")
+        self.assertEqual(self.t.cursor.attr.fg, DEFAULT_FG)
+        self.assertIsInstance(self.t.cursor.attr.fg, int)
+
+    def test_256color_still_palette_index(self):
+        # 38;5 仍走调色板索引，不受影响
+        self._feed("\x1b[38;5;196m")
+        self.assertEqual(self.t.cursor.attr.fg, 196)
+        self.assertIsInstance(self.t.cursor.attr.fg, int)
+
+    def test_truecolor_with_bold(self):
+        # 粗体 + 真彩色：fg 保持元组（渲染时不亮化）
+        self._feed("\x1b[1;38;2;10;200;30m")
+        self.assertEqual(self.t.cursor.attr.fg, (10, 200, 30))
+        self.assertTrue(self.t.cursor.attr.mode & 4)   # ATTR_BOLD
+
+
+# ── 括号粘贴（DEC 2004） ───────────────────────────────
+
+class TestBracketedPaste(unittest.TestCase):
+    def setUp(self):
+        self.t = Term(80, 24)
+        self.vt = Vt100(self.t)
+        self.vt.tty_write = lambda s: None
+
+    def _feed(self, s: str):
+        for ch in s:
+            self.vt.t_putc(ch)
+
+    def test_mode_set_and_clear(self):
+        self.assertFalse(self.t.mode & MODE_BRACKETPASTE)
+        self._feed("\x1b[?2004h")
+        self.assertTrue(self.t.mode & MODE_BRACKETPASTE)
+        self._feed("\x1b[?2004l")
+        self.assertFalse(self.t.mode & MODE_BRACKETPASTE)
+
+    def test_wrap_when_enabled(self):
+        # vim/bash 开启 2004 时，粘贴内容用 200~/201~ 包裹
+        self.assertEqual(
+            bracket_paste("line1\n    line2", True),
+            "\x1b[200~line1\n    line2\x1b[201~")
+
+    def test_raw_when_disabled(self):
+        # 未开启 2004 时原样写入
+        self.assertEqual(bracket_paste("line1\nline2", False),
+                         "line1\nline2")
 
 
 # ── 按键校准 ────────────────────────────────────────────
@@ -472,7 +570,48 @@ class TestWcwidth(unittest.TestCase):
             self.assertEqual(char_width(ch), expected, f'{ch!r}')
 
 
-# ── 渲染器光标恢复（SDL dummy 无头渲染，逐像素对比） ──
+# ── PTY 增量 UTF-8 解码（跨 read 块重组） ──
+
+class TestPtyHandlerUtf8(unittest.TestCase):
+    """增量 UTF-8 解码：跨 4096 字节 read 块的多字节字符必须完整重组
+    （对应 C 版 tty_read 的 static buf + memmove 残字节方案）。"""
+
+    def _feed(self, p: PtyHandler, chunks: list[bytes]) -> str:
+        return ''.join(p._decode(c) for c in chunks)
+
+    def test_split_3byte_char_across_chunks(self):
+        # '你' = E4 BD A0 — 逐字节喂入（模拟极端跨块）
+        p = PtyHandler()
+        self.assertEqual(self._feed(p, [b'\xe4', b'\xbd', b'\xa0']), '你')
+
+    def test_split_at_4096_boundary(self):
+        # 4095 个 ASCII 后跟半个汉字，下一块接上剩余字节
+        p = PtyHandler()
+        h = '好'.encode('utf-8')
+        out = self._feed(p, [b'a' * 4095 + h[:1], h[1:]])
+        self.assertEqual(out, 'a' * 4095 + '好')
+
+    def test_split_4byte_char(self):
+        # emoji '🎉' = F0 9F 8E 89 — 拆成 3 块
+        p = PtyHandler()
+        h = '🎉'.encode('utf-8')
+        self.assertEqual(self._feed(p, [h[:1], h[1:3], h[3:]]), '🎉')
+
+    def test_mixed_valid_and_split(self):
+        # 有效字符 + 跨块字符 + 有效字符
+        p = PtyHandler()
+        h = '你'.encode('utf-8')
+        out = self._feed(p, [b'ab', h[:2], h[2:], b'cd'])
+        self.assertEqual(out, 'ab你cd')
+
+    def test_invalid_byte_replaced(self):
+        p = PtyHandler()
+        self.assertEqual(p._decode(b'\xff'), '�')
+        # 无效字节不污染解码器状态
+        self.assertEqual(p._decode('中'.encode('utf-8')), '中')
+
+
+# ── 渲染器（SDL dummy 无头渲染，逐像素对比） ──
 
 W, H = 320, 160
 CW, CH = 8, 16
@@ -481,13 +620,20 @@ BORDER = 2
 CJK_LINE = "你好世界 abcd\n"   # 宽字符 4 个 + 空格 + abcd，光标终点 (13, 0)
 
 
-class TestRendererCursorRestore(unittest.TestCase):
-    """光标移走后，画面必须与"光标从未在该位置停留"的参考画面一致。
+class _RendererTestBase(unittest.TestCase):
+    """SDL dummy 无头渲染测试基类（窗口/renderer 生命周期 + 快照）。"""
 
-    方法：同一内容在两个独立 renderer 上绘制——参考画面光标直接
-    移到最终位置；场景画面光标先在中间格停留再移过去。两者逐像素
-    比较，不一致说明留下了残影/抹除了内容。
-    """
+    def _assert_cell_has_pixel(self, img: bytes, col: int, row: int,
+                               color: tuple) -> None:
+        """断言格子 (col, row) 区域内存在指定 RGBA 像素。"""
+        canvas = Image.frombytes("RGBA", (W, H), img)
+        x0 = BORDER + col * CW
+        y0 = BORDER + row * CH
+        for y in range(y0, y0 + CH):
+            for x in range(x0, x0 + CW):
+                if canvas.getpixel((x, y)) == color:
+                    return
+        self.fail(f"cell({col},{row}) 中未找到像素 {color}")
 
     def setUp(self):
         if sdl2.SDL_Init(sdl2.SDL_INIT_VIDEO) < 0:
@@ -519,6 +665,15 @@ class TestRendererCursorRestore(unittest.TestCase):
             return r._img.tobytes()
         finally:
             r.shutdown()
+
+
+class TestRendererCursorRestore(_RendererTestBase):
+    """光标移走后，画面必须与"光标从未在该位置停留"的参考画面一致。
+
+    方法：同一内容在两个独立 renderer 上绘制——参考画面光标直接
+    移到最终位置；场景画面光标先在中间格停留再移过去。两者逐像素
+    比较，不一致说明留下了残影/抹除了内容。
+    """
 
     def _assert_restore_clean(self, content: str, stops: list,
                               final: tuple, label: str):
@@ -557,6 +712,62 @@ class TestRendererCursorRestore(unittest.TestCase):
         # 左像素列有墨，CJK 居中无墨所以宽字符场景看不到）
         self._assert_restore_clean(
             "ab\x1b[4mcd\x1b[0m ef\n", [(2, 0)], (7, 0), "下划线恢复")
+
+
+class TestRendererTrueColor(_RendererTestBase):
+    """真彩色渲染像素级验证：38;2;R;G;B 精确着色，粗体不亮化。"""
+
+    def test_truecolor_fg_pixel(self):
+        img = self._snapshot("\x1b[38;2;10;200;30m█\x1b[0m", [(1, 0)])
+        self._assert_cell_has_pixel(img, 0, 0, (10, 200, 30, 255))
+
+    def test_truecolor_bold_not_brightened(self):
+        # 粗体真彩色不得亮化（调色板索引 16-195 的亮化会把颜色 +36 偏移）
+        img = self._snapshot("\x1b[1;38;2;10;200;30m█\x1b[0m", [(1, 0)])
+        self._assert_cell_has_pixel(img, 0, 0, (10, 200, 30, 255))
+
+    def test_truecolor_bg_pixel(self):
+        img = self._snapshot("\x1b[48;2;255;0;0m \x1b[0m", [(1, 0)])
+        canvas = Image.frombytes("RGBA", (W, H), img)
+        # 空格格角落像素（非墨迹区）应为真彩色背景
+        self.assertEqual(
+            canvas.getpixel((BORDER + 1, BORDER + 1)), (255, 0, 0, 255))
+
+    def test_256color_palette_pixel(self):
+        # 38;5 仍走调色板：断言像素等于 COLORMAP[196]
+        img = self._snapshot("\x1b[38;5;196m█\x1b[0m", [(1, 0)])
+        r, g, b = COLORMAP[196]
+        self._assert_cell_has_pixel(img, 0, 0, (r, g, b, 255))
+
+
+class TestRendererWideOverwrite(_RendererTestBase):
+    """宽字符尾格被普通字符覆盖后必须正常渲染
+    （残留 WIDE_TAIL 标记会被 renderer 跳过 → 显示空白）。"""
+
+    def test_overwritten_tail_renders(self):
+        term = Term(40, 10)
+        vt = Vt100(term)
+        vt.tty_write = lambda s: None
+        r = Renderer(term, self._ren, W, H, char_w=CW, char_h=CH,
+                     border_px=BORDER, font_size=12)
+        try:
+            for ch in "你你你你":   # heads 0,2,4,6 / tails 1,3,5,7
+                vt.t_putc(ch)
+            # tmux 重绘场景：ASCII 覆盖宽字符的头格+尾格
+            vt.t_move_to(6, 0)
+            vt.t_putc('X')
+            vt.t_move_to(7, 0)
+            vt.t_putc('Y')
+            vt.t_move_to(8, 0)
+            r.draw_frame()
+            img = r._img
+        finally:
+            r.shutdown()
+        # 修复前：col7 残留 WIDE_TAIL → renderer 跳过 → 'Y' 显示空白
+        self.assertFalse(term.lines[0][7].state & GLYPH_WIDE_TAIL)
+        r2, g2, b2 = COLORMAP[DEFAULT_FG]
+        self._assert_cell_has_pixel(img.tobytes(), 6, 0, (r2, g2, b2, 255))
+        self._assert_cell_has_pixel(img.tobytes(), 7, 0, (r2, g2, b2, 255))
 
 
 if __name__ == '__main__':

@@ -4,6 +4,7 @@
 tty_resize() 以及 main.c 中的 tty_thread()。
 """
 
+import codecs
 import os
 import pty
 import struct
@@ -35,6 +36,11 @@ class PtyHandler:
         self.on_child_exit: callable = None  # 子进程退出时调用
 
         self._thread: threading.Thread | None = None
+
+        # 增量 UTF-8 解码器 — 跨 read 块缓存残字节
+        # （对齐 C 版 tty_read 的 static buf + memmove 残字节方案，
+        #   避免 4096 边界处多字节字符被拆开产生 �）
+        self._decoder = codecs.getincrementaldecoder('utf-8')('replace')
 
     # ── 创建 PTY ──────────────────────────────────────
 
@@ -139,6 +145,10 @@ class PtyHandler:
 
     # ── PTY 读取线程 ──────────────────────────────────
 
+    def _decode(self, data: bytes) -> str:
+        """增量 UTF-8 解码：残字节缓存到下一块，跨块字符完整重组。"""
+        return self._decoder.decode(data)
+
     def start_reader_thread(self):
         """启动子线程，阻塞等待 PTY 输出。"""
         self._thread = threading.Thread(
@@ -161,7 +171,7 @@ class PtyHandler:
                         self.on_child_exit()
                     break
 
-                text = data.decode('utf-8', errors='replace')
+                text = self._decode(data)
                 if self.on_data:
                     self.on_data(text)
 

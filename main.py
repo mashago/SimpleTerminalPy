@@ -21,7 +21,7 @@ import sdl2.ext
 from config import (
     DEFAULT_SHELL, BUTTON_HELD_DELAY, KBD_DEVICE,
 )
-from terminal import Term
+from terminal import Term, is_set, MODE_BRACKETPASTE
 from vt100 import Vt100
 from pty_handler import PtyHandler
 from renderer import Renderer
@@ -50,6 +50,17 @@ if getattr(sys, "frozen", False):
 else:
     APP_DIR = os.path.dirname(os.path.abspath(__file__))
     KEYMAP_PATH = os.path.join(APP_DIR, "key_map.json")
+
+
+def bracket_paste(text: str, enabled: bool) -> str:
+    """括号粘贴（DEC 2004）包裹：模式开启时用 200~/201~ 包裹粘贴文本。
+
+    vim/bash 开启 2004 时进入"粘贴模式"，多行/缩进内容不会被
+    当成按键序列——避免自动缩进错乱和误执行。
+    """
+    if enabled:
+        return "\033[200~" + text + "\033[201~"
+    return text
 
 
 def parse_args():
@@ -579,7 +590,12 @@ class SDLApp:
             if sdl2.SDL_HasClipboardText():
                 text = sdl2.SDL_GetClipboardText()
                 if text and self.pty:
-                    self.pty.write(text.decode('utf-8', errors='replace'))
+                    s = text.decode('utf-8', errors='replace')
+                    # 括号粘贴：vim/bash 开启 2004 时包裹，避免
+                    # 多行粘贴触发自动缩进/误执行
+                    self.pty.write(bracket_paste(
+                        s, is_set(self.vt100.term.mode,
+                                  MODE_BRACKETPASTE)))
                 sdl2.SDL_free(text)
             return
 

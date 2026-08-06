@@ -332,7 +332,8 @@ class Renderer:
 
         # 粗体颜色亮化（C 版 x_draws 行为，对齐 mintty 的 Bold 色）：
         # bold 时 0-7 基本色 → +8 亮色，256 色立方 → +36，灰度 → +4
-        if bold:
+        # 真彩色 (R,G,B) 元组不做亮化 — 真实终端行为，主题粗体颜色不漂移
+        if bold and isinstance(fg_idx, int):
             if 0 <= fg_idx <= 7:
                 fg_idx += 8
             elif 16 <= fg_idx <= 195:
@@ -527,9 +528,10 @@ class Renderer:
              py + self.char_h - 1), fill=bg_c)
 
         # 字符（含宽字符）——reverse + bold 亮化与 _draw_glyph_at 一致
+        # （真彩色元组不做亮化，与 _draw_glyph_at 的 isinstance 守卫一致）
         bold = bool(g.mode & ATTR_BOLD)
         fg_idx = g.bg if reverse else g.fg
-        if bold:
+        if bold and isinstance(fg_idx, int):
             if 0 <= fg_idx <= 7:
                 fg_idx += 8
             elif 16 <= fg_idx <= 195:
@@ -658,8 +660,12 @@ class Renderer:
     # 辅助
     # ══════════════════════════════════════════════════════
 
-    def _color_of(self, idx: int) -> tuple:
-        """颜色索引 → RGBA tuple。"""
+    def _color_of(self, idx) -> tuple:
+        """颜色（调色板索引 int 或真彩色 (R,G,B) 元组）→ RGBA tuple。"""
+        if isinstance(idx, tuple):
+            # 真彩色 — 直接使用，不经过 COLORMAP
+            r, g, b = idx
+            return (r, g, b, 255)
         if idx < 0 or idx >= len(COLORMAP):
             idx = DEFAULT_FG
         r, g, b = COLORMAP[idx]

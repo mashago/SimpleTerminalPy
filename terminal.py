@@ -34,6 +34,7 @@ MODE_MOUSEMOTION = 64
 MODE_MOUSE      = 32 | 64
 MODE_REVERSE    = 128
 MODE_KBDLOCK    = 256
+MODE_BRACKETPASTE = 512   # DEC 2004 括号粘贴（粘贴时用 200~/201~ 包裹）
 
 # ── Escape 状态位 ───────────────────────────────────────
 ESC_START       = 1
@@ -73,8 +74,8 @@ class Glyph:
     def __init__(self):
         self.c = ' '          # UTF-8 字符
         self.mode = 0        # ATTR_* 位组合
-        self.fg = DEFAULT_FG  # 前景色索引
-        self.bg = DEFAULT_BG  # 背景色索引
+        self.fg = DEFAULT_FG  # 前景色：调色板索引 int 或真彩色 (R,G,B) 元组
+        self.bg = DEFAULT_BG  # 背景色：同上
         self.state = 0        # GLYPH_SET / GLYPH_DIRTY
 
     def copy_from(self, other: 'Glyph'):
