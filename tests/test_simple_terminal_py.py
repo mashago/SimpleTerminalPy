@@ -12,6 +12,7 @@
   - OSK 渲染缓存与特殊键输出
   - key_map.json 路径（源码/frozen/只读回退）
   - 字符宽度
+  - 渲染器光标恢复（宽字符残影 / 下划线 / 格子矩形 1px 溢出）
 """
 
 import json
@@ -20,7 +21,12 @@ import sys
 import tempfile
 import unittest
 
+# 无头渲染测试需要（必须在 sdl2.SDL_Init 之前设置）
+os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
+os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
+
 import sdl2
+from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -31,6 +37,7 @@ from config import KBD_DEVICE
 from key_calibrate import KeyCalibrator, load_keymap, KEY_GUIDE_ROWS
 from input_handler import InputHandler
 from osk import OSK
+from renderer import Renderer
 
 
 # ── VT100 解析 ──────────────────────────────────────────
@@ -463,6 +470,93 @@ class TestWcwidth(unittest.TestCase):
         ]
         for ch, expected in cases:
             self.assertEqual(char_width(ch), expected, f'{ch!r}')
+
+
+# ── 渲染器光标恢复（SDL dummy 无头渲染，逐像素对比） ──
+
+W, H = 320, 160
+CW, CH = 8, 16
+BORDER = 2
+
+CJK_LINE = "你好世界 abcd\n"   # 宽字符 4 个 + 空格 + abcd，光标终点 (13, 0)
+
+
+class TestRendererCursorRestore(unittest.TestCase):
+    """光标移走后，画面必须与"光标从未在该位置停留"的参考画面一致。
+
+    方法：同一内容在两个独立 renderer 上绘制——参考画面光标直接
+    移到最终位置；场景画面光标先在中间格停留再移过去。两者逐像素
+    比较，不一致说明留下了残影/抹除了内容。
+    """
+
+    def setUp(self):
+        if sdl2.SDL_Init(sdl2.SDL_INIT_VIDEO) < 0:
+            self.fail(f"SDL_Init: {sdl2.SDL_GetError()}")
+        self._win = sdl2.SDL_CreateWindow(b"t", 0, 0, W, H, 0)
+        self._ren = sdl2.SDL_CreateRenderer(
+            self._win, -1, sdl2.SDL_RENDERER_SOFTWARE)
+
+    def tearDown(self):
+        if self._ren:
+            sdl2.SDL_DestroyRenderer(self._ren)
+        if self._win:
+            sdl2.SDL_DestroyWindow(self._win)
+        sdl2.SDL_Quit()
+
+    def _snapshot(self, content: str, path: list) -> bytes:
+        """在全新 renderer 上按光标路径绘制，返回画布字节。"""
+        term = Term(40, 10)
+        vt = Vt100(term)
+        vt.tty_write = lambda s: None
+        r = Renderer(term, self._ren, W, H, char_w=CW, char_h=CH,
+                     border_px=BORDER, font_size=12)
+        try:
+            for ch in content:
+                vt.t_putc(ch)
+            for x, y in path:
+                vt.t_move_to(x, y)
+                r.draw_frame()
+            return r._img.tobytes()
+        finally:
+            r.shutdown()
+
+    def _assert_restore_clean(self, content: str, stops: list,
+                              final: tuple, label: str):
+        ref = self._snapshot(content, [final])
+        img = self._snapshot(content, list(stops) + [final])
+        if ref == img:
+            return
+        # 失败时输出差异摘要（避免 unittest 打印整个画布字节）
+        a = Image.frombytes("RGBA", (W, H), img)
+        b = Image.frombytes("RGBA", (W, H), ref)
+        diff = Image.new("L", (W, H))
+        n = 0
+        for y in range(H):
+            for x in range(W):
+                if a.getpixel((x, y)) != b.getpixel((x, y)):
+                    diff.putpixel((x, y), 255)
+                    n += 1
+        self.fail(f"{label}: {n} px 与参考不一致, "
+                  f"差异区域 {diff.getbbox()}")
+
+    def test_wide_char_head_no_residue(self):
+        # 光标在中文头格停留后移开 —— 残影主 bug
+        self._assert_restore_clean(
+            CJK_LINE, [(2, 0)], (13, 0), "宽字符头格光标恢复")
+
+    def test_wide_char_tail_no_erase(self):
+        # 光标停在宽字符尾格后移开 —— 头尾两格完整恢复，
+        # 不得用默认背景抹掉字形右半边
+        self._assert_restore_clean(
+            CJK_LINE, [(3, 0)], (13, 0), "宽字符尾格光标恢复")
+
+    def test_underline_preserved(self):
+        # 光标经过下划线（SGR 4）字符后，下划线必须完整保留。
+        # 同时覆盖：格子矩形不得溢出 1px 到相邻格——恢复矩形
+        # 溢出的那一格会被 'd' 的左边缘墨迹暴露（左对齐字符最
+        # 左像素列有墨，CJK 居中无墨所以宽字符场景看不到）
+        self._assert_restore_clean(
+            "ab\x1b[4mcd\x1b[0m ef\n", [(2, 0)], (7, 0), "下划线恢复")
 
 
 if __name__ == '__main__':

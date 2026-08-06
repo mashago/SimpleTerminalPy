@@ -260,7 +260,7 @@ class Renderer:
         # 全宽清除（含左右 border）— OSK 等全宽合成物可能覆盖 border 区域
         py_clear = self.border_px + y * self.char_h
         self._draw.rectangle(
-            (0, py_clear, self.width, py_clear + self.char_h),
+            (0, py_clear, self.width, py_clear + self.char_h - 1),
             fill=self._color_of(DEFAULT_BG))
 
         # 合并同属性相邻格，批量绘制
@@ -302,7 +302,8 @@ class Renderer:
             pw = (batch_end - batch_start) * self.char_w
 
             self._draw.rectangle(
-                (px, py, px + pw, py + self.char_h), fill=bg_color)
+                (px, py, px + pw - 1, py + self.char_h - 1),
+                fill=bg_color)
 
             # 画每个字符
             i = batch_start
@@ -480,7 +481,8 @@ class Renderer:
                 bg_c = self._color_of(DEFAULT_CS)
 
             self._draw.rectangle(
-                (x, y, x + self.char_w * width, y + self.char_h),
+                (x, y, x + self.char_w * width - 1,
+                 y + self.char_h - 1),
                 fill=bg_c)
 
             # 画字符（反转时用显示背景色，保证可见）
@@ -494,37 +496,65 @@ class Renderer:
         self._old_cx, self._old_cy = cur.x, cur.y
 
     def _restore_cell(self, x: int, y: int):
-        """从网格重画指定格子（用于恢复旧光标位置）。"""
+        """从网格重画指定格子（用于恢复旧光标位置）。
+
+        宽字符感知：光标块在宽字符上占 2 列（含尾格），恢复区域必须
+        同样宽，否则右半列残留光标块色块（残影）。
+        """
         if not (0 <= x < self.term.col and 0 <= y < self.term.row):
             return
         g = self.term.lines[y][x]
+        is_tail = bool(g.state & GLYPH_WIDE_TAIL)
+
+        # 光标在宽字符尾格时，回退到头格一并恢复
+        if is_tail and x > 0:
+            x -= 1
+            g = self.term.lines[y][x]
+
+        is_set = bool(g.state & GLYPH_SET)
+        w = max(1, char_width(g.c)) if is_set else 1    # 字形宽度
+        span_w = 2 if is_tail else w                    # 背景宽度（对齐光标块）
         px = self.border_px + x * self.char_w
         py = self.border_px + y * self.char_h
 
         # 背景（reverse 时交换：背景画 fg 色）——
         # 必须与 _draw_dirty_line 一致，否则光标恢复和绘制不同色
-        is_set = bool(g.state & GLYPH_SET)
         reverse = bool(g.mode & ATTR_REVERSE)
         bg_idx = (g.fg if reverse else g.bg) if is_set else DEFAULT_BG
         bg_c = self._color_of(bg_idx)
         self._draw.rectangle(
-            (px, py, px + self.char_w, py + self.char_h), fill=bg_c)
+            (px, py, px + self.char_w * span_w - 1,
+             py + self.char_h - 1), fill=bg_c)
 
         # 字符（含宽字符）——reverse + bold 亮化与 _draw_glyph_at 一致
+        bold = bool(g.mode & ATTR_BOLD)
+        fg_idx = g.bg if reverse else g.fg
+        if bold:
+            if 0 <= fg_idx <= 7:
+                fg_idx += 8
+            elif 16 <= fg_idx <= 195:
+                fg_idx += 36
+            elif 232 <= fg_idx <= 251:
+                fg_idx += 4
+
         if is_set and g.c not in (' ', ''):
-            w = max(1, char_width(g.c))
-            bold = bool(g.mode & ATTR_BOLD)
-            fg_idx = g.bg if reverse else g.fg
-            if bold:
-                if 0 <= fg_idx <= 7:
-                    fg_idx += 8
-                elif 16 <= fg_idx <= 195:
-                    fg_idx += 36
-                elif 232 <= fg_idx <= 251:
-                    fg_idx += 4
             img = self._get_glyph_image(g.c, fg_idx, bold, w)
             if img:
                 self._img.paste(img, (px, py), img)
+
+        # 下划线（基线下方 1px）——与 _draw_glyph_at 一致；
+        # 原版 x_draws 恢复旧光标时同样画下划线
+        if is_set and g.c not in (' ', '') and (g.mode & ATTR_UNDERLINE):
+            ul_w = self.char_w * w
+            font = self._pil_font_bold if bold else self._pil_font
+            if font is not None:
+                _, descent = font.getmetrics()
+                ul_y = py + self.char_h - descent + 1
+            else:
+                ul_y = py + self.char_h - 2
+            self._draw.line(
+                (px, ul_y, px + ul_w - 1, ul_y),
+                fill=self._color_of(fg_idx), width=1)
 
     def toggle_blink(self):
         """切换 blink 状态。调用方应每 500ms 调用一次。"""

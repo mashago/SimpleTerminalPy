@@ -186,7 +186,7 @@ SimpleTerminalPy/
 │   ├── DroidSansFallbackFull.ttf # 中文 CJK
 │   └── LICENSE.txt
 ├── screenshots/         # README 截图
-├── tests/               # unittest 测试套件（33 个）
+├── tests/               # unittest 测试套件（44 个）
 │   └── test_simple_terminal_py.py
 ├── key_map.json         # 玩家校准结果（运行时生成）
 ├── SimpleTerminalPy-Raw.sh  # 源码版启动脚本（部署时改名 SimpleTerminalPy.sh）

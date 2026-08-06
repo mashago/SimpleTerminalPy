@@ -188,7 +188,7 @@ SimpleTerminalPy/
 │   ├── DroidSansFallbackFull.ttf # CJK
 │   └── LICENSE.txt
 ├── screenshots/         # README screenshots
-├── tests/               # unittest suite (33 tests)
+├── tests/               # unittest suite (44 tests)
 │   └── test_simple_terminal_py.py
 ├── key_map.json         # Player calibration result (generated at runtime)
 ├── SimpleTerminalPy-Raw.sh  # Source launcher (rename to SimpleTerminalPy.sh in APPS)
