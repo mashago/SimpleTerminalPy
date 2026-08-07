@@ -12,6 +12,8 @@
   - OSK 渲染缓存与特殊键输出
   - key_map.json 路径（源码/frozen/只读回退）
   - 字符宽度
+  - 拼音输入法（pinyin_ime：前缀匹配/频率排序/分页）
+  - OSK 拼音模式（🌐 切换/组合/选字/智能退格/翻页/布局锁定）
   - 括号粘贴（DEC 2004：模式位 + 200~/201~ 包裹）
   - 真彩色（38;2;R;G;B）解析与渲染（粗体不亮化）
   - PTY 增量 UTF-8 解码（跨 read 块重组）
@@ -40,8 +42,9 @@ from config import KBD_DEVICE, DEFAULT_FG, COLORMAP
 from key_calibrate import KeyCalibrator, load_keymap, KEY_GUIDE_ROWS
 from main import bracket_paste
 from input_handler import InputHandler
-from osk import OSK
+from osk import OSK, ROW_PINYIN, LAYOUTS
 from pty_handler import PtyHandler
+from pinyin_ime import PinyinIME
 from renderer import Renderer
 
 
@@ -223,6 +226,171 @@ class TestTrueColor(unittest.TestCase):
         self._feed("\x1b[1;38;2;10;200;30m")
         self.assertEqual(self.t.cursor.attr.fg, (10, 200, 30))
         self.assertTrue(self.t.cursor.attr.mode & 4)   # ATTR_BOLD
+
+
+# ── 拼音输入法（pinyin_ime.py） ─────────────────────────
+
+# 合成小字典（真实字典由 generate_pinyin_dict.py 生成，测试用临时表）
+TEST_PINYIN_DICT = {
+    "zhong": [["中", 7000], ["种", 3000], ["重", 2000]],
+    "zhi": [["只", 900], ["之", 800], ["直", 700], ["知", 600],
+            ["治", 500], ["志", 400]],
+    "ni": [["你", 6000], ["尼", 500]],
+    "hao": [["好", 5000], ["号", 400]],
+}
+
+
+class TestPinyinIme(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.NamedTemporaryFile(
+            "w", suffix=".json", delete=False, encoding="utf-8")
+        json.dump(TEST_PINYIN_DICT, tmp, ensure_ascii=False)
+        tmp.close()
+        self._path = tmp.name
+        self.ime = PinyinIME(self._path)
+
+    def tearDown(self):
+        os.unlink(self._path)
+
+    def test_lazy_load(self):
+        self.assertFalse(self.ime.loaded)
+        self.ime.candidates("zh")     # 查询时懒加载
+        self.assertTrue(self.ime.loaded)
+
+    def test_prefix_match_and_ordering(self):
+        # "zh" 前缀命中 zhong + zhi 全部条目，按频率降序
+        self.assertEqual(
+            self.ime.candidates("zh"),
+            ["中", "种", "重", "只", "之", "直", "知", "治", "志"])
+
+    def test_exact_pinyin_ordering(self):
+        self.assertEqual(self.ime.candidates("ni"), ["你", "尼"])
+
+    def test_paging(self):
+        # 9 个候选 → 2 页（5+4）
+        page0, total = self.ime.page("zh", 0)
+        self.assertEqual(total, 2)
+        self.assertEqual(page0, ["中", "种", "重", "只", "之"])
+        page1, _ = self.ime.page("zh", 1)
+        self.assertEqual(page1, ["直", "知", "治", "志"])
+
+    def test_page_clamping(self):
+        _, total = self.ime.page("zh", 0)
+        page_hi, total_hi = self.ime.page("zh", 99)   # 越界夹到最后一页
+        self.assertEqual(total_hi, total)
+        self.assertEqual(page_hi, ["直", "知", "治", "志"])
+        page_lo, _ = self.ime.page("zh", -5)
+        self.assertEqual(page_lo, ["中", "种", "重", "只", "之"])
+
+    def test_empty_and_no_match(self):
+        self.assertEqual(self.ime.candidates(""), [])
+        self.assertEqual(self.ime.candidates("nihao"), [])
+        self.assertEqual(self.ime.candidates("x"), [])   # 无 x 前缀
+
+    def test_missing_dict_file(self):
+        ime = PinyinIME("/nonexistent/pinyin_dict.json")
+        self.assertEqual(ime.candidates("zh"), [])
+
+
+# ── OSK 拼音输入模式 ───────────────────────────────────
+
+class TestOSKPinyin(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.NamedTemporaryFile(
+            "w", suffix=".json", delete=False, encoding="utf-8")
+        json.dump(TEST_PINYIN_DICT, tmp, ensure_ascii=False)
+        tmp.close()
+        self._path = tmp.name
+        self.osk = OSK(720, 480, dict_path=self._path)
+
+    def tearDown(self):
+        os.unlink(self._path)
+
+    def _toggle_pinyin(self):
+        """光标移到 🌐（ROW_LOWER 第 4 行第 1 列）并按 A。"""
+        self.osk.row, self.osk.col = 3, 0
+        self.osk.press_selected()
+
+    def test_toggle_and_layout_lock(self):
+        self.assertFalse(self.osk.pinyin_active)
+        self._toggle_pinyin()
+        self.assertTrue(self.osk.pinyin_active)
+        self.assertEqual(self.osk.current_layout, ROW_PINYIN)
+        # 拼音模式下切 symbols 无效（锁定 lower 变体）
+        self.osk.mode = "symbols"
+        self.assertEqual(self.osk.current_layout, ROW_PINYIN)
+        self._toggle_pinyin()   # "EN" 键 → 退出
+        self.assertFalse(self.osk.pinyin_active)
+        self.assertEqual(self.osk.current_layout, LAYOUTS["symbols"])  # 复原
+
+    def test_toggle_clears_modifier_locks(self):
+        self.osk.ctrl = True
+        self._toggle_pinyin()
+        self.assertFalse(self.osk.ctrl)
+
+    def test_letter_composition(self):
+        self.osk.pinyin_active = True
+        self.assertIsNone(self.osk.process_pinyin("z"))
+        self.assertIsNone(self.osk.process_pinyin("h"))
+        self.assertEqual(self.osk.pinyin_buf, "zh")
+
+    def _compose(self, letters: str):
+        """逐键输入字母（模拟逐键路由）。"""
+        for ch in letters:
+            self.assertIsNone(self.osk.process_pinyin(ch))
+
+    def test_select_candidate(self):
+        self.osk.pinyin_active = True
+        self._compose("zh")
+        out = self.osk.process_pinyin("1")
+        self.assertEqual(out, "中")     # zh 前缀频率最高
+        self.assertEqual(self.osk.pinyin_buf, "")   # 选中后清空
+
+    def test_digit_passthrough_when_empty(self):
+        self.osk.pinyin_active = True
+        self.assertEqual(self.osk.process_pinyin("5"), "5")   # 空→透传
+        self.assertEqual(self.osk.process_pinyin("0"), "0")
+
+    def test_digit_ignored_beyond_candidates(self):
+        self.osk.pinyin_active = True
+        self._compose("zh")             # 9 个候选（1-9 都可选）
+        self.assertIsNone(self.osk.process_pinyin("0"))   # 第 10 个 → 忽略
+
+    def test_smart_backspace(self):
+        self.osk.pinyin_active = True
+        self._compose("zh")
+        self.assertIsNone(self.osk.process_pinyin("\177"))
+        self.assertEqual(self.osk.pinyin_buf, "z")
+        self.assertIsNone(self.osk.process_pinyin("\177"))
+        self.assertEqual(self.osk.pinyin_buf, "")
+        self.assertEqual(self.osk.process_pinyin("\177"), "\177")  # 空→透传
+
+    def test_paging(self):
+        self.osk.pinyin_active = True
+        self._compose("zh")             # 9 候选 → 2 页
+        self.assertIsNone(self.osk.process_pinyin("+"))
+        self.assertEqual(self.osk.pinyin_page, 1)
+        self.assertEqual(self.osk.process_pinyin("1"), "直")
+        self.assertIsNone(self.osk.process_pinyin("-"))
+        self.assertEqual(self.osk.pinyin_page, 0)
+
+    def test_enter_commits_raw(self):
+        self.osk.pinyin_active = True
+        self._compose("nihao")          # 无匹配
+        self.assertEqual(self.osk.process_pinyin("\r"), "nihao")
+        self.assertEqual(self.osk.pinyin_buf, "")
+        self.assertEqual(self.osk.process_pinyin("\r"), "\r")  # 空→透传
+
+    def test_pass_through_control(self):
+        self.osk.pinyin_active = True
+        self.assertEqual(self.osk.process_pinyin("\x03"), "\x03")  # Ctrl+C
+
+    def test_render_bar_height(self):
+        h0 = self.osk.render().height
+        self.osk.pinyin_active = True
+        self.osk.invalidate()
+        h1 = self.osk.render().height
+        self.assertEqual(h1 - h0, 2 * (self.osk.key_h + self.osk.key_gap))
 
 
 # ── 括号粘贴（DEC 2004） ───────────────────────────────

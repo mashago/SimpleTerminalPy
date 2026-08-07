@@ -473,17 +473,34 @@ class SDLApp:
         """OSK 活跃时的动作。"""
         osk = self.osk
         pty = self.pty
+        term = self.term
         if osk is None or pty is None:
             return
 
         if name in ("up", "down", "left", "right"):
             getattr(osk, f"move_{name}")()
         elif name == "a":
+            was_pinyin = osk.pinyin_active
             seq = osk.press_selected()
-            if seq:
+            if osk.pinyin_active != was_pinyin:
+                # 拼音模式切换 → OSK 高度变化 → 全屏重绘防残留
+                term.full_dirt()
+            if seq is None:
+                pass
+            elif osk.pinyin_active:
+                # 拼音模式：字母/数字/⌫/↵/−+ 走 IME 路由（None=已消费）
+                seq = osk.process_pinyin(seq)
+                if seq is not None:
+                    pty.write(seq)
+            else:
                 pty.write(seq)
         elif name == "b":
-            pty.write("\177")   # Backspace
+            if osk.pinyin_active:
+                seq = osk.process_pinyin("\177")   # 智能退格
+                if seq is not None:
+                    pty.write(seq)
+            else:
+                pty.write("\177")   # Backspace
         elif name == "l2":
             # 原版 KEY_ARROW_LEFT — OSK 活跃时直通左方向键
             pty.write("\033[D")
@@ -491,7 +508,12 @@ class SDLApp:
             # 原版 KEY_ARROW_RIGHT — OSK 活跃时直通右方向键
             pty.write("\033[C")
         elif name == "start":
-            pty.write("\r")     # Enter
+            if osk.pinyin_active:
+                seq = osk.process_pinyin("\r")     # Enter 兜底提交
+                if seq is not None:
+                    pty.write(seq)
+            else:
+                pty.write("\r")     # Enter
         elif name == "select":
             pty.write("\t")     # Tab
 
