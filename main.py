@@ -26,7 +26,7 @@ from vt100 import Vt100
 from pty_handler import PtyHandler
 from renderer import Renderer
 from input_handler import InputHandler
-from osk import OSK
+from osk_mgr import OSKManager
 from key_calibrate import KeyCalibrator, KeyHelpScreen, load_keymap
 
 # ── 全局选项 ────────────────────────────────────────────
@@ -106,7 +106,7 @@ class SDLApp:
 
         # 输入
         self.input_handler: InputHandler | None = None
-        self.osk: OSK | None = None
+        self.osk: OSKManager | None = None
         self.keymap: dict[str, tuple] = {}
 
         # 手柄
@@ -254,7 +254,7 @@ class SDLApp:
 
         # 输入
         self.input_handler = InputHandler(keymap=self.keymap)
-        self.osk = OSK(self.screen_w, self.screen_h)
+        self.osk = OSKManager(self.screen_w, self.screen_h)
 
         # 启动 PTY
         self.pty.spawn(rows=rows, cols=cols)
@@ -479,43 +479,15 @@ class SDLApp:
 
         if name in ("up", "down", "left", "right"):
             getattr(osk, f"move_{name}")()
-        elif name == "a":
-            was_pinyin = osk.pinyin_active
-            seq = osk.press_selected()
-            if osk.pinyin_active != was_pinyin:
-                # 拼音模式切换 → OSK 高度变化 → 全屏重绘防残留
+        else:
+            # 语义化按键：manager 按当前语言分派（英文/拼音/未来语言）
+            lang_before = osk.language
+            seq = osk.press(name)
+            if osk.language != lang_before:
+                # 语言切换 → OSK 高度变化 → 全屏重绘防残留
                 term.full_dirt()
-            if seq is None:
-                pass
-            elif osk.pinyin_active:
-                # 拼音模式：字母/数字/⌫/↵/−+ 走 IME 路由（None=已消费）
-                seq = osk.process_pinyin(seq)
-                if seq is not None:
-                    pty.write(seq)
-            else:
+            if seq:
                 pty.write(seq)
-        elif name == "b":
-            if osk.pinyin_active:
-                seq = osk.process_pinyin("\177")   # 智能退格
-                if seq is not None:
-                    pty.write(seq)
-            else:
-                pty.write("\177")   # Backspace
-        elif name == "l2":
-            # 原版 KEY_ARROW_LEFT — OSK 活跃时直通左方向键
-            pty.write("\033[D")
-        elif name == "r2":
-            # 原版 KEY_ARROW_RIGHT — OSK 活跃时直通右方向键
-            pty.write("\033[C")
-        elif name == "start":
-            if osk.pinyin_active:
-                seq = osk.process_pinyin("\r")     # Enter 兜底提交
-                if seq is not None:
-                    pty.write(seq)
-            else:
-                pty.write("\r")     # Enter
-        elif name == "select":
-            pty.write("\t")     # Tab
 
         self.needs_redraw = True
 
