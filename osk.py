@@ -30,21 +30,21 @@ ROW_LOWER = [
      ("m", "m"), (",", ","), (".", "."), ("#+=", None)],
 ]
 
-# 拼音模式布局：布局锁定小写（lower），末两位换 −/+ 翻页键
+# 拼音模式布局：锁定小写（lower），无 Esc/Tab/Ctrl/Alt/⇧，
+# + 在数字行（0 后、⌫ 前），− 在 p 与回车之间，EN 在末行最左
 ROW_PINYIN = [
-    [("Esc", "\033"), ("1", "1"), ("2", "2"), ("3", "3"),
-     ("4", "4"), ("5", "5"), ("6", "6"), ("7", "7"),
-     ("8", "8"), ("9", "9"), ("0", "0"), ("⌫", "\177")],
-    [("Tab", "\t"), ("q", "q"), ("w", "w"), ("e", "e"),
-     ("r", "r"), ("t", "t"), ("y", "y"), ("u", "u"),
-     ("i", "i"), ("o", "o"), ("p", "p"), ("↵", "\r")],
-    [("Ctrl", None), ("a", "a"), ("s", "s"), ("d", "d"),
-     ("f", "f"), ("g", "g"), ("h", "h"), ("j", "j"),
-     ("k", "k"), ("l", "l"), ("⇧", None), ("␣", " ")],
-    # "EN" 标签 + 末尾 −/+ 翻页（拼音模式下 ⇧/#+= 无效）
-    [("EN", None), ("Alt", None), ("z", "z"), ("x", "x"),
-     ("c", "c"), ("v", "v"), ("b", "b"), ("n", "n"),
-     ("m", "m"), (",", ","), (".", "."), ("−", "-"), ("+", "+")],
+    [("1", "1"), ("2", "2"), ("3", "3"), ("4", "4"),
+     ("5", "5"), ("6", "6"), ("7", "7"), ("8", "8"),
+     ("9", "9"), ("0", "0"), ("+", "+"), ("⌫", "\177")],
+    [("q", "q"), ("w", "w"), ("e", "e"), ("r", "r"),
+     ("t", "t"), ("y", "y"), ("u", "u"), ("i", "i"),
+     ("o", "o"), ("p", "p"), ("−", "-"), ("↵", "\r")],
+    [("a", "a"), ("s", "s"), ("d", "d"), ("f", "f"),
+     ("g", "g"), ("h", "h"), ("j", "j"), ("k", "k"),
+     ("l", "l"), ("␣", " ")],
+    [("EN", None), ("z", "z"), ("x", "x"), ("c", "c"),
+     ("v", "v"), ("b", "b"), ("n", "n"), ("m", "m"),
+     (",", ","), (".", ".")],
 ]
 
 ROW_UPPER = [
@@ -121,6 +121,7 @@ class OSK:
         self.key_h = 34
         self.key_gap = 2
         self.margin = 4
+        self.bar_row_h = 22   # 拼音组合区/候选区行高（比按键矮）
 
         # 颜色（背景不透明 — 半透明 paste 会透出底下内容导致颜色不均，
         # 且残留 alpha 混合值影响关闭后的覆盖）
@@ -331,6 +332,11 @@ class OSK:
                 return out
             return "\r"
 
+        # 组合区有内容时，布局上可透传的按键（空格/逗号/句号）不进终端——
+        # 否则 backspace 只能删组合区，误输入的符号无法删除
+        if self.pinyin_buf and seq in (" ", ",", "."):
+            return None
+
         return seq
 
     # ── 修饰键控制 ────────────────────────────────────
@@ -393,7 +399,7 @@ class OSK:
 
         # 拼音模式：顶部多 2 行（组合区 + 候选区），键盘整体下移
         bar_rows = 2 if self.pinyin_active else 0
-        bar_h = bar_rows * (self.key_h + self.key_gap)
+        bar_h = bar_rows * self.bar_row_h
 
         # 计算键盘尺寸
         max_cols = max(len(row) for row in layout)
@@ -410,13 +416,13 @@ class OSK:
             (0, 0, self.screen_w - 1, kb_h - 1),
             fill=self.COLOR_BG)
 
-        # 拼音模式：组合区 + 候选区（数字键上方）
-        if self.pinyin_active:
-            self._draw_pinyin_bar(draw, self.margin)
-
         # 居中键盘内容（拼音模式整体下移 bar_h）
         offset_x = (self.screen_w - kb_w) // 2 + self.margin
         y0 = self.margin + bar_h
+
+        # 拼音模式：组合区 + 候选区（与键盘第一键左对齐）
+        if self.pinyin_active:
+            self._draw_pinyin_bar(draw, self.margin, offset_x)
 
         font = self._font
 
@@ -464,32 +470,49 @@ class OSK:
 
     # ── 拼音输入法渲染 ────────────────────────────────
 
-    def _draw_pinyin_bar(self, draw: ImageDraw.ImageDraw, margin: int):
-        """绘制拼音模式顶部的组合区 + 候选区两行（数字键上方）。"""
+    def _draw_pinyin_bar(self, draw: ImageDraw.ImageDraw, margin: int,
+                         offset_x: int):
+        """绘制拼音模式顶部的组合区 + 候选区两行（数字键上方）。
+
+        与键盘第一键左对齐（offset_x）；页码右对齐到键盘右缘。
+        """
         y0 = margin
-        y1 = margin + self.key_h + self.key_gap
+        y1 = margin + self.bar_row_h
         buf = self.pinyin_buf
+        layout = self.current_layout
+        max_cols = max(len(row) for row in layout)
+        keys_right = offset_x + (max_cols - 1) * (self.key_w + self.key_gap) \
+            + self.key_w
+
+        # 行内垂直居中（矮行放 14px 文字）
+        _, descent = self._font.getmetrics()
+        text_h = self._font.getmetrics()[0] + descent
+        ty0 = y0 + max(0, (self.bar_row_h - text_h) // 2)
+        ty1 = y1 + max(0, (self.bar_row_h - text_h) // 2)
 
         # 第一行：组合区（拼音字母 + 光标），空时提示
         comp = buf + "|" if buf else "拼音输入中"
-        self._draw_text(draw, comp, margin, y0, self.COLOR_TEXT)
+        self._draw_text(draw, comp, offset_x, ty0, self.COLOR_TEXT)
 
-        # 第二行：候选区（1-5 选字），右侧页码
+        # 第二行：候选区（1-9 选字），页码右对齐键盘右缘
         cands, total = self.ime.page(buf, self.pinyin_page)
         if not buf:
-            self._draw_text(draw, "输入拼音字母，1-5 选字，−/+ 翻页",
-                            margin, y1, self.COLOR_DIM)
+            self._draw_text(draw, "输入拼音字母，1-9 选字，−/+ 翻页",
+                            offset_x, ty1, self.COLOR_DIM)
         elif not cands:
             self._draw_text(draw, "无匹配 — Enter 提交原文",
-                            margin, y1, self.COLOR_DIM)
+                            offset_x, ty1, self.COLOR_DIM)
         else:
             text = "  ".join(f"{i + 1}{c}" for i, c in enumerate(cands))
-            x_end = self._draw_text(draw, text, margin, y1, self.COLOR_TEXT)
+            x_end = self._draw_text(draw, text, offset_x, ty1,
+                                    self.COLOR_TEXT)
             if total > 1:
-                self._draw_text(
-                    draw, f"第{self.pinyin_page + 1}/{total}页",
-                    min(x_end + self.key_w, self.screen_w - margin - 60),
-                    y1, self.COLOR_DIM)
+                ind = f"第{self.pinyin_page + 1}/{total}页"
+                w = sum(
+                    (self._cjk_font if self._needs_cjk(c) else self._font)
+                    .getlength(c) for c in ind)
+                ix = max(x_end + self.key_w, keys_right - w)
+                self._draw_text(draw, ind, ix, ty1, self.COLOR_DIM)
 
     def _draw_text(self, draw: ImageDraw.ImageDraw, text: str,
                    x: int, y: int, color: tuple) -> int:

@@ -35,6 +35,8 @@ python3 main.py
 # 强制重新校准按键
 python3 main.py -reset-keymap
 
+**最低分辨率**：640×480（横屏）——受 OSK 宽度（608px）与按键说明页约束
+
 # 命令行参数
 python3 main.py [-font font.ttf] [-fontsize 12] [-rotate 0|90|180|270]
                 [-term xterm-256color] [-reset-keymap] [-r "command"]

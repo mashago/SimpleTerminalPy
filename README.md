@@ -42,6 +42,8 @@ python3 main.py [-font font.ttf] [-fontsize 12] [-rotate 0|90|180|270]
 
 **Dependencies**: `python3`, `pysdl2`, `Pillow` (SDL2 system libraries required)
 
+**Minimum resolution**: 640×480 (landscape) — constrained by the OSK width (608px) and the key guide page
+
 ---
 
 ## Fonts

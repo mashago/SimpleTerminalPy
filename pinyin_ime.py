@@ -13,7 +13,7 @@
 import json
 import os
 
-PAGE_SIZE = 5
+PAGE_SIZE = 9
 _DICT_FILENAME = "pinyin_dict.json"
 
 
