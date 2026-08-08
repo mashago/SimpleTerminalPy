@@ -7,7 +7,7 @@
   move_up/down/left/right()    光标导航
   press(name)                  语义化动作键 → 要写入终端的文本（None=已消费）
   render() / invalidate()      渲染与缓存失效
-  shift_down/up/toggle_sticky  L1/R1 修饰键控制（委托当前键盘）
+  on_l1_press/release、on_r1_press  掌机按键回调（委托当前键盘）
 
 加新语言 = 在 osk/ 加一个键盘类 + 本文件注册一行，main.py 零改动。
 """
@@ -80,16 +80,16 @@ class OSKManager:
             return self.kb.process(seq)
         return self.kb.action(name)
 
-    # ── 修饰键控制（委托） ─────────────────────────────
+    # ── 掌机按键回调（委托当前键盘） ────────────────────
 
-    def shift_down(self):
-        self.kb.shift_down()
+    def on_l1_press(self):
+        self.kb.on_l1_press()
 
-    def shift_up(self):
-        self.kb.shift_up()
+    def on_l1_release(self):
+        self.kb.on_l1_release()
 
-    def toggle_sticky(self):
-        self.kb.toggle_sticky()
+    def on_r1_press(self):
+        self.kb.on_r1_press()
 
     # ── 渲染 ──────────────────────────────────────────
 

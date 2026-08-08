@@ -126,8 +126,8 @@ class OSKEn(_OSKBase):
 
     # ── 修饰键控制 ────────────────────────────────────
 
-    def toggle_sticky(self):
-        """R1 → 锁定/解锁当前选中的修饰键（sticky）。
+    def on_r1_press(self):
+        """R1 按下 → 锁定/解锁当前选中的修饰键（sticky）。
 
         原版 KEY_OSKTOGGLE 行为：
         - 选中 Ctrl/Alt/⇧ 键时按 R1 → 锁定；再按 → 解锁
@@ -155,13 +155,13 @@ class OSKEn(_OSKBase):
         if changed:
             self.invalidate()
 
-    def shift_down(self):
+    def on_l1_press(self):
         """L1 按下 → 切到 upper 布局（原版按住式 Shift）。"""
         if not self.shift_locked:
             self.mode = "upper"
             self.invalidate()
 
-    def shift_up(self):
+    def on_l1_release(self):
         """L1 松开 → 回 lower 布局。"""
         if not self.shift_locked:
             self.mode = "lower"

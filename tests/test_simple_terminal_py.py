@@ -389,6 +389,23 @@ class TestOSKPinyinKeyboard(unittest.TestCase):
         self.assertEqual(self.kb.action("start"), "zhong")  # 提交原文
         self.assertEqual(self.kb.action("b"), "\177")   # 组合区空 → 透传
 
+    def test_l1_r1_paging(self):
+        # L1 → 上一页，R1 → 下一页（类似 −/+）
+        self._compose("zh")             # 12 候选 → 2 页
+        self.kb.on_r1_press()           # R1 → 下一页
+        self.assertEqual(self.kb.pinyin_page, 1)
+        self.kb.on_l1_press()           # L1 → 上一页
+        self.assertEqual(self.kb.pinyin_page, 0)
+        self.kb.on_l1_press()           # 已在第 0 页 → 夹取不越界
+        self.assertEqual(self.kb.pinyin_page, 0)
+
+    def test_l1_r1_noop_without_candidates(self):
+        # 组合区空（无候选）时 L1/R1 无操作
+        self.kb.on_r1_press()
+        self.assertEqual(self.kb.pinyin_page, 0)
+        self.kb.on_l1_press()
+        self.assertEqual(self.kb.pinyin_page, 0)
+
     def test_render_bar_height(self):
         from osk.osk_en import OSKEn
         h_en = OSKEn(720, 480).render().height
@@ -462,6 +479,18 @@ class TestOSKManager(unittest.TestCase):
         self._press_globe()
         h_py = self.mgr.render().height
         self.assertEqual(h_py - h_en, 2 * self.mgr.kb.bar_row_h)
+
+    def test_l1_r1_delegation(self):
+        # 英文：L1 → upper 布局；拼音：L1/R1 → 候选翻页（经门面委托）
+        self.mgr.on_l1_press()
+        self.assertEqual(self.mgr._kbs["en"].mode, "upper")
+        self._press_globe()                            # → pinyin
+        self.mgr.kb.process("z")
+        self.mgr.kb.process("h")                       # buf="zh"（2 页）
+        self.mgr.on_r1_press()                         # R1 → 下一页
+        self.assertEqual(self.mgr.kb.pinyin_page, 1)
+        self.mgr.on_l1_press()                         # L1 → 上一页
+        self.assertEqual(self.mgr.kb.pinyin_page, 0)
 
 
 # ── 括号粘贴（DEC 2004） ───────────────────────────────
@@ -664,13 +693,13 @@ class TestOSK(unittest.TestCase):
         self.osk.row, self.osk.col = 2, 0      # ↑
         self.assertEqual(self.osk.press_selected(), '\x1b[A')
 
-    def test_shift_down_up(self):
+    def test_l1_press_release(self):
         img_lower = self.osk.render()
-        self.osk.shift_down()                   # L1 按下
+        self.osk.on_l1_press()                  # L1 按下 → upper
         self.assertEqual(self.osk.mode, 'upper')
         img_upper = self.osk.render()
         self.assertIsNot(img_lower, img_upper)  # 缓存失效
-        self.osk.shift_up()
+        self.osk.on_l1_release()
         self.assertEqual(self.osk.mode, 'lower')
 
 

@@ -430,19 +430,19 @@ class SDLApp:
                 self.needs_redraw = True
             return
 
-        # L1: 按住式 Shift（原版 KEY_SHIFT）
+        # L1: 语义由当前语言键盘决定（英文=按住式 Shift，拼音=候选上一页）
         if name == "l1":
             if pressed:
-                osk.shift_down()
+                osk.on_l1_press()
             else:
-                osk.shift_up()
+                osk.on_l1_release()
             self.needs_redraw = True
             return
 
-        # R1: sticky 锁定当前选中修饰键（原版 KEY_OSKTOGGLE）
+        # R1: 语义由当前语言键盘决定（英文=sticky 锁定，拼音=候选下一页）
         if name == "r1":
             if pressed:
-                osk.toggle_sticky()
+                osk.on_r1_press()
                 self.needs_redraw = True
             return
 

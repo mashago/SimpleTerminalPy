@@ -98,12 +98,7 @@ class OSKPinyin(_OSKBase):
 
         # 候选翻页
         if seq in ("+", "-"):
-            _, total = self.ime.page(self.pinyin_buf, self.pinyin_page)
-            if total <= 1:
-                return None
-            self.pinyin_page += 1 if seq == "+" else -1
-            self.pinyin_page = max(0, min(self.pinyin_page, total - 1))
-            self.invalidate()
+            self._page(1 if seq == "+" else -1)
             return None
 
         # Enter 兜底：提交原始拼音
@@ -130,6 +125,25 @@ class OSKPinyin(_OSKBase):
         if name == "start":
             return self.process("\r")
         return super().action(name)
+
+    # ── 翻页（+ / − / L1 / R1 共用） ────────────────────
+
+    def _page(self, delta: int):
+        """候选翻页（+1 下一页 / -1 上一页）。无候选或单页时无操作。"""
+        _, total = self.ime.page(self.pinyin_buf, self.pinyin_page)
+        if total <= 1:
+            return
+        self.pinyin_page += delta
+        self.pinyin_page = max(0, min(self.pinyin_page, total - 1))
+        self.invalidate()
+
+    def on_l1_press(self):
+        """L1 按下 → 候选上一页（类似 −）。"""
+        self._page(-1)
+
+    def on_r1_press(self):
+        """R1 按下 → 候选下一页（类似 +）。"""
+        self._page(1)
 
     # ── 渲染 ──────────────────────────────────────────
 
@@ -160,7 +174,7 @@ class OSKPinyin(_OSKBase):
         # 第二行：候选区（1-9 选字），页码右对齐键盘右缘
         cands, total = self.ime.page(buf, self.pinyin_page)
         if not buf:
-            self._draw_text(draw, "输入拼音字母，1-9 选字，−/+ 翻页",
+            self._draw_text(draw, "输入拼音字母，1-9 选字，−/+/L1/R1 翻页",
                             offset_x, ty1, self.COLOR_DIM)
         elif not cands:
             self._draw_text(draw, "无匹配 — Enter 提交原文",

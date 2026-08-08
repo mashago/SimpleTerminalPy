@@ -9,7 +9,7 @@
   - _apply_modifiers     普通键的修饰应用（英文 Ctrl/Alt/Shift）
   - process(seq)         按键输出再处理（拼音路由；英文透传）
   - action(name)         动作键语义（b/start/select/l2/r2）
-  - shift_down/up、toggle_sticky  修饰键控制（英文实现）
+  - on_l1_press/release、on_r1_press  掌机按键回调（英文/拼音各自实现）
   - _is_locked(label)    键锁定高亮（英文 Ctrl/Alt/⇧）
   - extra_bar_rows / draw_extra()  顶部扩展渲染（拼音组合/候选区）
 """
@@ -176,16 +176,16 @@ class _OSKBase:
             return "\033[C"      # 右方向键（直通）
         return None
 
-    # ── 修饰键控制（英文实现，基类空操作） ──────────────
+    # ── 掌机按键回调（子类实现各自语义，基类空操作） ────
 
-    def toggle_sticky(self):
-        """R1 → 锁定/解锁当前选中的修饰键（子类实现）。"""
+    def on_l1_press(self):
+        """L1 按下（子类实现：英文切 upper，拼音候选上一页）。"""
 
-    def shift_down(self):
-        """L1 按下（子类实现）。"""
+    def on_l1_release(self):
+        """L1 松开（子类实现：英文回 lower）。"""
 
-    def shift_up(self):
-        """L1 松开（子类实现）。"""
+    def on_r1_press(self):
+        """R1 按下（子类实现：英文 sticky 锁定，拼音候选下一页）。"""
 
     def _is_locked(self, label: str) -> bool:
         """键锁定高亮判断（子类覆盖）。"""
