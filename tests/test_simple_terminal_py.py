@@ -105,6 +105,26 @@ class TestVt100(unittest.TestCase):
             self.vt.t_putc('\n')
         self.assertGreater(len(self.t.scrollback), 0)
 
+    def test_scroll_view_bounds(self):
+        """scroll_view_up/down 边界：上限=scrollback 长度，下限=0。
+
+        （L2/R2 卡在 3 行的回归防护——滚动键不能被"任何键重置滚动"
+        归零，边界逻辑本身也要正确。）
+        """
+        t = Term(80, 24)
+        for _ in range(10):
+            t.scrollback_add_line(t.lines[0])   # 塞 10 行历史
+        t.scroll_view_up(3)
+        self.assertEqual(t.scroll_offset, 3)
+        for _ in range(10):
+            t.scroll_view_up(3)                  # 反复上翻 → 夹到上限
+        self.assertEqual(t.scroll_offset, 10)
+        t.scroll_view_down(3)
+        self.assertEqual(t.scroll_offset, 7)
+        for _ in range(10):
+            t.scroll_view_down(3)                # 反复下翻 → 夹到 0
+        self.assertEqual(t.scroll_offset, 0)
+
     def test_t_reset(self):
         """回归测试：TAB_SPACES 未导入曾导致 NameError 崩溃。"""
         self.vt.t_reset()   # 之前这里崩溃

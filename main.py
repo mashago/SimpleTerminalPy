@@ -459,8 +459,9 @@ class SDLApp:
                 self.needs_redraw = True
             return
 
-        # 非 OSK 键也重置滚动
-        if term.scroll_offset > 0:
+        # 非 OSK 键也重置滚动（L2/R2 是滚动键本身，不重置——
+        # 否则每次 L2 先被归零再 +3，永远停在 3 行）
+        if term.scroll_offset > 0 and name not in ("l2", "r2"):
             term.scroll_view_reset()
             self.needs_redraw = True
 
