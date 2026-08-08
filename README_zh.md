@@ -10,6 +10,7 @@
 - 括号粘贴（DEC 2004）——vim/bash/tmux 中多行粘贴安全
 - PTY 交互式 shell（vim / top / htop 等均可运行）
 - 屏幕虚拟键盘（OSK）
+- **OSK 拼音输入法**——拼音组合输入中文（🌐 键切换，1-9 选字，−/+/L1/R1 翻页）
 - Scrollback 历史缓冲（256 行）
 - 中文双列宽显示（自带 CJK 字体，Apache 2.0）
 - 按键校准向导（自适应任何掌机）
@@ -48,7 +49,8 @@ python3 main.py [-font font.ttf] [-fontsize 12] [-rotate 0|90|180|270]
 
 首次启动（或 `-reset-keymap`）会进入**按键校准向导**：
 
-<img src="screenshots/screenshot5.jpg" alt="按键校准" width="400"/>
+<img src="screenshots/keymap1.jpg" alt="按键校准 1" width="400"/>
+<img src="screenshots/keymap2.jpg" alt="按键校准 2" width="400"/>
 
 ```
         KEY SETUP
@@ -134,6 +136,8 @@ python3 main.py [-font font.ttf] [-fontsize 12] [-rotate 0|90|180|270]
 
 > 掌机按键与蓝牙键盘按事件类型隔离：`btn`/`hat`/`cbtn` 来自手柄设备，与键盘事件天然不冲突。`key` 通道与任何外接键盘共享 SDL 键盘事件（SDL2 无逐键盘设备 ID）——仅当掌机按键被校准为 key 通道时才可能冲突。
 
+> **拼音模式下**：**L1** = 候选上一页，**R1** = 候选下一页（同 − / +）。
+
 ---
 
 ## OSK 使用
@@ -144,6 +148,15 @@ python3 main.py [-font font.ttf] [-fontsize 12] [-rotate 0|90|180|270]
 - **R1 锁定 Shift**：大写锁定（L1 不影响锁定的 Shift）
 - 符号层通过 OSK 上的 `#+=` 键进入，`ABC` 键返回
 - **X** 随时显示/隐藏 OSK
+
+### 拼音输入（中文）
+
+- 按左下角 **🌐** 键（标签"中"）进入拼音模式（标签变"EN"），再按一次返回
+- 输入拼音字母 → 数字键上方出现候选；**1-9** 选字，**− / + / L1 / R1** 翻页
+- **⌫ / B** 智能退格：先删组合区字母，组合区空时透传终端
+- **Enter / START** 兜底：无匹配时把原始拼音提交到终端
+- 组合区有内容时 ␣/逗号/句号被吞掉（否则 ⌫ 只能删组合区，误输入的符号无法删除）
+- 候选按 Jun Da 字频表排序；字典（`pinyin_dict.json`）由 `generate_pinyin_dict.py` 生成（pypinyin 拼音表 + Jun Da 字频）
 
 ---
 
@@ -180,7 +193,14 @@ SimpleTerminalPy/
 ├── vt100.py             # VT100 状态机（30+ CSI 命令）
 ├── pty_handler.py       # PTY 创建 + select 读取线程
 ├── renderer.py          # PIL 脏行增量渲染 + 字形 LRU 缓存
-├── osk.py               # 屏幕虚拟键盘
+├── osk_mgr.py           # OSK 门面（语言切换 + 按键分派）
+├── osk/                 # 语言键盘
+│   ├── osk_base.py      #   公共 UI 内核（导航/渲染/缓存）
+│   ├── osk_en.py        #   英文键盘（布局 + 修饰键语义）
+│   └── osk_pinyin.py    #   拼音键盘（组合/候选/IME 路由）
+├── pinyin_ime.py        # 拼音字典查询（前缀匹配 + 分页）
+├── pinyin_dict.json     # 拼音 → 汉字字典（生成产物，~650KB）
+├── generate_pinyin_dict.py  # 字典生成脚本（pypinyin + Jun Da 字频表）
 ├── input_handler.py     # 事件 (type, value, device) → 逻辑键
 ├── key_calibrate.py     # 按键校准向导 + 按键说明界面
 ├── wcwidth.py           # Unicode East Asian Width
@@ -190,7 +210,7 @@ SimpleTerminalPy/
 │   ├── DroidSansFallbackFull.ttf # 中文 CJK
 │   └── LICENSE.txt
 ├── screenshots/         # README 截图
-├── tests/               # unittest 测试套件（64 个）
+├── tests/               # unittest 测试套件（93 个）
 │   └── test_simple_terminal_py.py
 ├── key_map.json         # 玩家校准结果（运行时生成）
 ├── SimpleTerminalPy-Raw.sh  # 源码版启动脚本（部署时改名 SimpleTerminalPy.sh）
@@ -220,6 +240,7 @@ bash sync_bin_to_app.sh
 - 彩色 Emoji 不支持（嵌入式终端合理取舍）
 - 极端全屏刷新（如 vim 首次启动）可能有短暂掉帧
 - 粗体/斜体 SGR 属性渲染无字形变化（粗体颜色已实现亮化，与 C 版一致）
+- 拼音输入法目前只支持单字候选（无双音节词匹配；"你好"需 ni → 选 → hao → 选）
 
 ## 许可
 
