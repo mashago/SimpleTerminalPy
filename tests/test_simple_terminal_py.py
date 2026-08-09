@@ -45,9 +45,11 @@ from input_handler import InputHandler
 from osk.osk_en import OSKEn, LAYOUTS
 from osk.osk_pinyin import OSKPinyin, ROW_PINYIN
 from osk_mgr import OSKManager
+from ext_ime.ext_ime_pinyin import ExtIMEPinyin
+from ext_ime_mgr import ExtIMEManager
 from pty_handler import PtyHandler
-from pinyin_ime import PinyinIME
-from renderer import Renderer
+from pinyin_ime import PinyinEngine, PinyinIME
+from renderer import Renderer, IME_BAR_BG
 
 
 # ── VT100 解析 ──────────────────────────────────────────
@@ -264,59 +266,186 @@ TEST_PINYIN_DICT = {
 }
 
 
-class TestPinyinIme(unittest.TestCase):
+class TestPinyinEngine(unittest.TestCase):
+    """字典查询引擎（PinyinEngine）：前缀匹配/排序/分页。"""
+
     def setUp(self):
         tmp = tempfile.NamedTemporaryFile(
             "w", suffix=".json", delete=False, encoding="utf-8")
         json.dump(TEST_PINYIN_DICT, tmp, ensure_ascii=False)
         tmp.close()
         self._path = tmp.name
-        self.ime = PinyinIME(self._path)
+        self.pinyin_engine = PinyinEngine(self._path)
 
     def tearDown(self):
         os.unlink(self._path)
 
     def test_lazy_load(self):
-        self.assertFalse(self.ime.loaded)
-        self.ime.candidates("zh")     # 查询时懒加载
-        self.assertTrue(self.ime.loaded)
+        self.assertFalse(self.pinyin_engine.loaded)
+        self.pinyin_engine.candidates("zh")     # 查询时懒加载
+        self.assertTrue(self.pinyin_engine.loaded)
 
     def test_prefix_match_and_ordering(self):
         # "zh" 前缀命中 zhong + zhi 全部条目，按频率降序
         self.assertEqual(
-            self.ime.candidates("zh"),
+            self.pinyin_engine.candidates("zh"),
             ["中", "种", "重", "只", "之", "直", "知", "治", "志",
              "指", "止", "纸"])
 
     def test_exact_pinyin_ordering(self):
-        self.assertEqual(self.ime.candidates("ni"), ["你", "尼"])
+        self.assertEqual(self.pinyin_engine.candidates("ni"), ["你", "尼"])
 
     def test_paging(self):
         # 12 个候选 → 2 页（9+3，PAGE_SIZE=9）
-        page0, total = self.ime.page("zh", 0)
+        page0, total = self.pinyin_engine.page("zh", 0)
         self.assertEqual(total, 2)
         self.assertEqual(
             page0, ["中", "种", "重", "只", "之", "直", "知", "治", "志"])
-        page1, _ = self.ime.page("zh", 1)
+        page1, _ = self.pinyin_engine.page("zh", 1)
         self.assertEqual(page1, ["指", "止", "纸"])
 
     def test_page_clamping(self):
-        _, total = self.ime.page("zh", 0)
-        page_hi, total_hi = self.ime.page("zh", 99)   # 越界夹到最后一页
+        _, total = self.pinyin_engine.page("zh", 0)
+        page_hi, total_hi = self.pinyin_engine.page("zh", 99)   # 越界夹到最后一页
         self.assertEqual(total_hi, total)
         self.assertEqual(page_hi, ["指", "止", "纸"])
-        page_lo, _ = self.ime.page("zh", -5)
+        page_lo, _ = self.pinyin_engine.page("zh", -5)
         self.assertEqual(
             page_lo, ["中", "种", "重", "只", "之", "直", "知", "治", "志"])
 
     def test_empty_and_no_match(self):
-        self.assertEqual(self.ime.candidates(""), [])
-        self.assertEqual(self.ime.candidates("nihao"), [])
-        self.assertEqual(self.ime.candidates("x"), [])   # 无 x 前缀
+        self.assertEqual(self.pinyin_engine.candidates(""), [])
+        self.assertEqual(self.pinyin_engine.candidates("nihao"), [])
+        self.assertEqual(self.pinyin_engine.candidates("x"), [])   # 无 x 前缀
 
     def test_missing_dict_file(self):
-        ime = PinyinIME("/nonexistent/pinyin_dict.json")
+        ime = PinyinEngine("/nonexistent/pinyin_dict.json")
         self.assertEqual(ime.candidates("zh"), [])
+
+
+# ── 拼音组合状态机（PinyinIME） ─────────────────────────
+
+class TestPinyinIME(unittest.TestCase):
+    """组合状态机：字母/选字/翻页/智能退格/兜底/条件拦截。"""
+
+    def setUp(self):
+        tmp = tempfile.NamedTemporaryFile(
+            "w", suffix=".json", delete=False, encoding="utf-8")
+        json.dump(TEST_PINYIN_DICT, tmp, ensure_ascii=False)
+        tmp.close()
+        self._path = tmp.name
+        self.pinyin_engine = PinyinEngine(self._path)
+        self.pinyin_ime = PinyinIME(engine=self.pinyin_engine)
+
+    def tearDown(self):
+        os.unlink(self._path)
+
+    def _compose(self, letters: str):
+        for ch in letters:
+            self.assertIsNone(self.pinyin_ime.process(ch))
+
+    def test_letter_composition(self):
+        self._compose("zh")
+        self.assertEqual(self.pinyin_ime.buf, "zh")
+
+    def test_select_candidate(self):
+        self._compose("zh")
+        out = self.pinyin_ime.process("1")
+        self.assertEqual(out, "中")
+        self.assertEqual(self.pinyin_ime.buf, "")
+
+    def test_digit_passthrough_when_empty(self):
+        self.assertEqual(self.pinyin_ime.process("5"), "5")
+        self.assertEqual(self.pinyin_ime.process("0"), "0")
+
+    def test_digit_ignored_beyond_candidates(self):
+        self._compose("zh")
+        self.assertIsNone(self.pinyin_ime.process("0"))
+
+    def test_smart_backspace(self):
+        self._compose("zh")
+        self.assertIsNone(self.pinyin_ime.process("\177"))
+        self.assertEqual(self.pinyin_ime.buf, "z")
+        self.assertIsNone(self.pinyin_ime.process("\177"))
+        self.assertEqual(self.pinyin_ime.buf, "")
+        self.assertEqual(self.pinyin_ime.process("\177"), "\177")
+
+    def test_paging(self):
+        self._compose("zh")
+        self.assertIsNone(self.pinyin_ime.process("+"))
+        self.assertEqual(self.pinyin_ime.page, 1)
+        # 选字后组合区清空
+        self.assertEqual(self.pinyin_ime.process("1"), "指")
+        self.assertEqual(self.pinyin_ime.buf, "")
+        # 重新组合后翻回上一页
+        self._compose("zh")
+        self.assertIsNone(self.pinyin_ime.process("-"))
+        self.assertEqual(self.pinyin_ime.page, 0)
+
+    def test_paging_passthrough_when_empty(self):
+        # 组合区空时 +/- 透传终端（能正常输入加减号）
+        self.assertEqual(self.pinyin_ime.process("+"), "+")
+        self.assertEqual(self.pinyin_ime.process("-"), "-")
+
+    def test_page_prev_next(self):
+        self._compose("zh")
+        self.pinyin_ime.page_next()
+        self.assertEqual(self.pinyin_ime.page, 1)
+        self.pinyin_ime.page_prev()
+        self.assertEqual(self.pinyin_ime.page, 0)
+        self.pinyin_ime.page_prev()   # 已在首页 → 夹取
+        self.assertEqual(self.pinyin_ime.page, 0)
+
+    def test_enter_commits_raw(self):
+        self._compose("nihao")
+        self.assertEqual(self.pinyin_ime.process("\r"), "nihao")
+        self.assertEqual(self.pinyin_ime.buf, "")
+        self.assertEqual(self.pinyin_ime.process("\r"), "\r")
+
+    def test_esc_clears_composition_when_composing(self):
+        # Esc：组合区有内容 → 清空（不回终端）
+        self._compose("zh")
+        self.assertIsNone(self.pinyin_ime.process("\x1b"))
+        self.assertEqual(self.pinyin_ime.buf, "")
+
+    def test_esc_passthrough_when_empty(self):
+        # Esc：组合区空 → 透传终端（保护 vim 的 Esc）
+        self.assertEqual(self.pinyin_ime.process("\x1b"), "\x1b")
+
+    def test_punctuation_blocked_when_composing(self):
+        self._compose("zh")
+        self.assertIsNone(self.pinyin_ime.process(" "))
+        self.assertIsNone(self.pinyin_ime.process(","))
+        self.assertIsNone(self.pinyin_ime.process("."))
+        self.assertEqual(self.pinyin_ime.buf, "zh")
+
+    def test_punctuation_passthrough_when_empty(self):
+        self.assertEqual(self.pinyin_ime.process(" "), " ")
+        self.assertEqual(self.pinyin_ime.process(","), ",")
+        self.assertEqual(self.pinyin_ime.process("."), ".")
+
+    def test_control_passthrough(self):
+        self.assertEqual(self.pinyin_ime.process("\x03"), "\x03")
+
+    def test_space_selects_first_when_enabled(self):
+        # space_selects_first=True：空格选中第一个候选
+        ime = PinyinIME(engine=self.pinyin_engine,
+                        space_selects_first=True)
+        for ch in "zh":
+            ime.process(ch)
+        self.assertEqual(ime.process(" "), "中")
+        self.assertEqual(ime.buf, "")
+
+    def test_space_swallowed_when_disabled(self):
+        # 默认（OSK 行为）：组合区有内容时空格被吞
+        self._compose("zh")
+        self.assertIsNone(self.pinyin_ime.process(" "))
+
+    def test_reset(self):
+        self._compose("zh")
+        self.pinyin_ime.reset()
+        self.assertEqual(self.pinyin_ime.buf, "")
+        self.assertEqual(self.pinyin_ime.page, 0)
 
 
 # ── OSK 拼音输入模式 ───────────────────────────────────
@@ -330,7 +459,8 @@ class TestOSKPinyinKeyboard(unittest.TestCase):
         json.dump(TEST_PINYIN_DICT, tmp, ensure_ascii=False)
         tmp.close()
         self._path = tmp.name
-        self.kb = OSKPinyin(720, 480, dict_path=self._path)
+        self.pinyin_engine = PinyinEngine(self._path)
+        self.kb = OSKPinyin(720, 480, engine=self.pinyin_engine)
 
     def tearDown(self):
         os.unlink(self._path)
@@ -343,13 +473,13 @@ class TestOSKPinyinKeyboard(unittest.TestCase):
     def test_letter_composition(self):
         self.assertIsNone(self.kb.process("z"))
         self.assertIsNone(self.kb.process("h"))
-        self.assertEqual(self.kb.pinyin_buf, "zh")
+        self.assertEqual(self.kb.ime.buf, "zh")
 
     def test_select_candidate(self):
         self._compose("zh")
         out = self.kb.process("1")
         self.assertEqual(out, "中")     # zh 前缀频率最高
-        self.assertEqual(self.kb.pinyin_buf, "")   # 选中后清空
+        self.assertEqual(self.kb.ime.buf, "")   # 选中后清空
 
     def test_digit_passthrough_when_empty(self):
         self.assertEqual(self.kb.process("5"), "5")   # 空→透传
@@ -362,23 +492,27 @@ class TestOSKPinyinKeyboard(unittest.TestCase):
     def test_smart_backspace(self):
         self._compose("zh")
         self.assertIsNone(self.kb.process("\177"))
-        self.assertEqual(self.kb.pinyin_buf, "z")
+        self.assertEqual(self.kb.ime.buf, "z")
         self.assertIsNone(self.kb.process("\177"))
-        self.assertEqual(self.kb.pinyin_buf, "")
+        self.assertEqual(self.kb.ime.buf, "")
         self.assertEqual(self.kb.process("\177"), "\177")  # 空→透传
 
     def test_paging(self):
         self._compose("zh")             # 12 候选 → 2 页
         self.assertIsNone(self.kb.process("+"))
-        self.assertEqual(self.kb.pinyin_page, 1)
+        self.assertEqual(self.kb.ime.page, 1)
+        # 选字后组合区清空
         self.assertEqual(self.kb.process("1"), "指")
+        self.assertEqual(self.kb.ime.buf, "")
+        # 重新组合后翻回上一页
+        self._compose("zh")
         self.assertIsNone(self.kb.process("-"))
-        self.assertEqual(self.kb.pinyin_page, 0)
+        self.assertEqual(self.kb.ime.page, 0)
 
     def test_enter_commits_raw(self):
         self._compose("nihao")          # 无匹配
         self.assertEqual(self.kb.process("\r"), "nihao")
-        self.assertEqual(self.kb.pinyin_buf, "")
+        self.assertEqual(self.kb.ime.buf, "")
         self.assertEqual(self.kb.process("\r"), "\r")  # 空→透传
 
     def test_pass_through_control(self):
@@ -390,7 +524,7 @@ class TestOSKPinyinKeyboard(unittest.TestCase):
         self.assertIsNone(self.kb.process(" "))
         self.assertIsNone(self.kb.process(","))
         self.assertIsNone(self.kb.process("."))
-        self.assertEqual(self.kb.pinyin_buf, "zh")   # 组合区不受影响
+        self.assertEqual(self.kb.ime.buf, "zh")   # 组合区不受影响
 
     def test_space_comma_period_passthrough_when_empty(self):
         # 组合区空时照常透传（"你好，世界"场景）
@@ -402,7 +536,7 @@ class TestOSKPinyinKeyboard(unittest.TestCase):
         # B → 智能退格；START → Enter 兜底；其余与英文一致
         self._compose("zh")
         self.assertIsNone(self.kb.action("b"))          # 删组合区
-        self.assertEqual(self.kb.pinyin_buf, "z")
+        self.assertEqual(self.kb.ime.buf, "z")
         self.assertEqual(self.kb.action("select"), "\t")
         self.assertEqual(self.kb.action("l2"), "\033[D")
         self._compose("hong")                            # buf="zhong"
@@ -413,18 +547,18 @@ class TestOSKPinyinKeyboard(unittest.TestCase):
         # L1 → 上一页，R1 → 下一页（类似 −/+）
         self._compose("zh")             # 12 候选 → 2 页
         self.kb.on_r1_press()           # R1 → 下一页
-        self.assertEqual(self.kb.pinyin_page, 1)
+        self.assertEqual(self.kb.ime.page, 1)
         self.kb.on_l1_press()           # L1 → 上一页
-        self.assertEqual(self.kb.pinyin_page, 0)
+        self.assertEqual(self.kb.ime.page, 0)
         self.kb.on_l1_press()           # 已在第 0 页 → 夹取不越界
-        self.assertEqual(self.kb.pinyin_page, 0)
+        self.assertEqual(self.kb.ime.page, 0)
 
     def test_l1_r1_noop_without_candidates(self):
         # 组合区空（无候选）时 L1/R1 无操作
         self.kb.on_r1_press()
-        self.assertEqual(self.kb.pinyin_page, 0)
+        self.assertEqual(self.kb.ime.page, 0)
         self.kb.on_l1_press()
-        self.assertEqual(self.kb.pinyin_page, 0)
+        self.assertEqual(self.kb.ime.page, 0)
 
     def test_render_bar_height(self):
         from osk.osk_en import OSKEn
@@ -442,7 +576,8 @@ class TestOSKManager(unittest.TestCase):
         json.dump(TEST_PINYIN_DICT, tmp, ensure_ascii=False)
         tmp.close()
         self._path = tmp.name
-        self.mgr = OSKManager(720, 480, dict_path=self._path)
+        self.pinyin_engine = PinyinEngine(self._path)
+        self.mgr = OSKManager(720, 480, engine=self.pinyin_engine)
 
     def tearDown(self):
         os.unlink(self._path)
@@ -477,7 +612,7 @@ class TestOSKManager(unittest.TestCase):
         self.mgr.kb.process("zh")
         self._press_globe()              # → en（清组合区）
         self._press_globe()              # → pinyin
-        self.assertEqual(self.mgr.kb.pinyin_buf, "")
+        self.assertEqual(self.mgr.kb.ime.buf, "")
 
     def test_press_delegation_en(self):
         self.mgr.kb.row, self.mgr.kb.col = 2, 3          # 小写 'd'
@@ -490,9 +625,9 @@ class TestOSKManager(unittest.TestCase):
         self._press_globe()                              # → pinyin
         self.mgr.kb.row, self.mgr.kb.col = 1, 1          # 'w'
         self.assertIsNone(self.mgr.press("a"))           # 进组合区
-        self.assertEqual(self.mgr.kb.pinyin_buf, "w")
+        self.assertEqual(self.mgr.kb.ime.buf, "w")
         self.assertIsNone(self.mgr.press("b"))           # 智能退格删组合
-        self.assertEqual(self.mgr.kb.pinyin_buf, "")
+        self.assertEqual(self.mgr.kb.ime.buf, "")
 
     def test_render_height_switch(self):
         h_en = self.mgr.render().height
@@ -508,9 +643,125 @@ class TestOSKManager(unittest.TestCase):
         self.mgr.kb.process("z")
         self.mgr.kb.process("h")                       # buf="zh"（2 页）
         self.mgr.on_r1_press()                         # R1 → 下一页
-        self.assertEqual(self.mgr.kb.pinyin_page, 1)
+        self.assertEqual(self.mgr.kb.ime.page, 1)
         self.mgr.on_l1_press()                         # L1 → 上一页
-        self.assertEqual(self.mgr.kb.pinyin_page, 0)
+        self.assertEqual(self.mgr.kb.ime.page, 0)
+
+
+# ── 外接键盘拼音输入法（ext_ime） ──────────────────────
+
+class TestExtIMEPinyin(unittest.TestCase):
+    """外接键盘拼音前端：toggle/handle/deactivate。"""
+
+    def setUp(self):
+        tmp = tempfile.NamedTemporaryFile(
+            "w", suffix=".json", delete=False, encoding="utf-8")
+        json.dump(TEST_PINYIN_DICT, tmp, ensure_ascii=False)
+        tmp.close()
+        self._path = tmp.name
+        self.pinyin_engine = PinyinEngine(self._path)
+        self.ext = ExtIMEPinyin(engine=self.pinyin_engine)
+
+    def tearDown(self):
+        os.unlink(self._path)
+
+    def test_inactive_passthrough(self):
+        # 未激活时 handle 原样返回（不影响正常键盘输入）
+        self.assertEqual(self.ext.handle("z"), "z")
+        self.assertEqual(self.ext.handle("1"), "1")
+
+    def test_toggle_activates(self):
+        self.assertFalse(self.ext.active)
+        self.ext.toggle()
+        self.assertTrue(self.ext.active)
+        self.ext.toggle()
+        self.assertFalse(self.ext.active)
+
+    def test_toggle_clears_composition(self):
+        self.ext.toggle()
+        self.ext.handle("z")
+        self.ext.handle("h")
+        self.assertEqual(self.ext.ime.buf, "zh")
+        self.ext.toggle()          # 关闭 → 清组合区
+        self.assertEqual(self.ext.ime.buf, "")
+
+    def test_handle_composition_and_select(self):
+        self.ext.toggle()
+        self.assertIsNone(self.ext.handle("z"))
+        self.assertIsNone(self.ext.handle("h"))
+        self.assertEqual(self.ext.handle("1"), "中")
+        self.assertEqual(self.ext.ime.buf, "")
+
+    def test_handle_esc_and_minus(self):
+        self.ext.toggle()
+        self.ext.handle("z")
+        self.ext.handle("h")
+        self.assertIsNone(self.ext.handle("\x1b"))     # Esc 清组合
+        self.assertEqual(self.ext.ime.buf, "")
+        self.assertEqual(self.ext.handle("\x1b"), "\x1b")   # 空时透传
+        self.assertEqual(self.ext.handle("-"), "-")     # 空时透传
+
+    def test_space_selects_first_candidate(self):
+        # 外接键盘：组合区有候选时空格选中第一个
+        self.ext.toggle()
+        self.ext.handle("z")
+        self.ext.handle("h")
+        self.assertEqual(self.ext.handle(" "), "中")
+        self.assertEqual(self.ext.ime.buf, "")
+
+    def test_deactivate(self):
+        self.ext.toggle()
+        self.ext.handle("zh")
+        self.ext.deactivate()
+        self.assertFalse(self.ext.active)
+        self.assertEqual(self.ext.ime.buf, "")
+        self.assertEqual(self.ext.handle("z"), "z")     # 恢复透传
+
+
+class TestExtIMEManager(unittest.TestCase):
+    """外接输入法门面：toggle/handle/组合条数据属性。"""
+
+    def setUp(self):
+        tmp = tempfile.NamedTemporaryFile(
+            "w", suffix=".json", delete=False, encoding="utf-8")
+        json.dump(TEST_PINYIN_DICT, tmp, ensure_ascii=False)
+        tmp.close()
+        self._path = tmp.name
+        self.pinyin_engine = PinyinEngine(self._path)
+        self.mgr = ExtIMEManager(engine=self.pinyin_engine)
+
+    def tearDown(self):
+        os.unlink(self._path)
+
+    def test_toggle_and_active(self):
+        self.assertFalse(self.mgr.active)
+        self.mgr.toggle()
+        self.assertTrue(self.mgr.active)
+        self.mgr.toggle()
+        self.assertFalse(self.mgr.active)
+
+    def test_handle_routing(self):
+        self.assertEqual(self.mgr.handle("z"), "z")    # 未激活透传
+        self.mgr.toggle()
+        self.assertIsNone(self.mgr.handle("z"))
+        self.assertIsNone(self.mgr.handle("h"))
+        self.assertEqual(self.mgr.buf, "zh")
+        self.assertEqual(self.mgr.handle("1"), "中")
+
+    def test_bar_data_properties(self):
+        self.mgr.toggle()
+        self.mgr.handle("z")
+        self.mgr.handle("h")
+        cands, total = self.mgr.candidates
+        self.assertEqual(cands[0], "中")
+        self.assertGreaterEqual(total, 1)
+        self.assertEqual(self.mgr.page, 0)
+
+    def test_deactivate(self):
+        self.mgr.toggle()
+        self.mgr.deactivate()
+        self.assertFalse(self.mgr.active)
+        self.assertEqual(self.mgr.handle("z"), "z")
 
 
 # ── 括号粘贴（DEC 2004） ───────────────────────────────
@@ -742,6 +993,8 @@ class TestCtrlKeys(unittest.TestCase):
         import main as main_mod
         app = main_mod.SDLApp.__new__(main_mod.SDLApp)
         app.pty = self._FakePty()
+        app.osk_mgr = None        # 无 OSK（_on_keydown 会访问）
+        app.ext_ime_mgr = None    # 无外接输入法
         return app
 
     @staticmethod
@@ -770,10 +1023,34 @@ class TestCtrlKeys(unittest.TestCase):
         self.assertEqual(app.pty.written, ['\x1b'])
 
     def test_ctrl_space(self):
+        # Ctrl+Space 现在用于切换外接拼音输入法（不再发 NUL）；
+        # 无 OSK/外接输入法时按 Ctrl+Space 无输出
         app = self._make_app()
         app._on_keydown(self._make_key(sdl2.SDLK_SPACE,
                                        sdl2.KMOD_LCTRL))
-        self.assertEqual(app.pty.written, ['\x00'])
+        self.assertEqual(app.pty.written, [])
+
+    def test_ime_paging_keys(self):
+        # 外接拼音激活时：- / = 键拦截为翻页（= 替代难按的 Shift+=）
+        app = self._make_app()
+
+        class _FakeIME:
+            active = True
+            def handle(self, seq):
+                app.pty.written.append(seq)
+                return None
+
+        app.ext_ime_mgr = _FakeIME()
+        app._on_keydown(self._make_key(sdl2.SDLK_EQUALS, 0))
+        self.assertEqual(app.pty.written, ['+'])
+        app.pty.written.clear()
+        app._on_keydown(self._make_key(sdl2.SDLK_MINUS, 0))
+        self.assertEqual(app.pty.written, ['-'])
+        app.pty.written.clear()
+        # 未激活时 = 正常输入
+        app.ext_ime_mgr.active = False
+        app._on_keydown(self._make_key(sdl2.SDLK_EQUALS, 0))
+        self.assertEqual(app.pty.written, [])
 
     def test_ctrl_c(self):
         """Ctrl+C → \\x03。"""
@@ -1056,6 +1333,59 @@ class TestRendererWideOverwrite(_RendererTestBase):
         r2, g2, b2 = COLORMAP[DEFAULT_FG]
         self._assert_cell_has_pixel(img.tobytes(), 6, 0, (r2, g2, b2, 255))
         self._assert_cell_has_pixel(img.tobytes(), 7, 0, (r2, g2, b2, 255))
+
+
+class TestRendererExtIMEBar(_RendererTestBase):
+    """外接拼音组合条渲染：光标上方（放不下则下方）、滚动时隐藏。"""
+
+    def _make_ext_ime(self):
+        tmp = tempfile.NamedTemporaryFile(
+            "w", suffix=".json", delete=False, encoding="utf-8")
+        json.dump(TEST_PINYIN_DICT, tmp, ensure_ascii=False)
+        tmp.close()
+        pinyin_engine = PinyinEngine(tmp.name)
+        return ExtIMEManager(engine=pinyin_engine), tmp.name
+
+    def _render_with_ime(self, row: int = 3, scroll: bool = False):
+        term = Term(40, 10)
+        vt = Vt100(term)
+        vt.tty_write = lambda s: None
+        r = Renderer(term, self._ren, W, H, char_w=CW, char_h=CH,
+                     border_px=BORDER, font_size=12)
+        mgr, path = self._make_ext_ime()
+        try:
+            for ch in "Hello":
+                vt.t_putc(ch)
+            vt.t_move_to(0, row)           # 光标在第 row 行
+            mgr.toggle()
+            if scroll:
+                term.scroll_offset = 2
+            r.draw_frame(ext_ime=mgr)
+            return r._img, path
+        finally:
+            r.shutdown()
+
+    def test_bar_drawn_above_cursor(self):
+        img, path = self._render_with_ime(row=3)
+        os.unlink(path)
+        # 光标行 3 顶 = 2+3*16 = 50；条底 = 48，条高 44 → 覆盖 4..47
+        # （x=300 远离条内文字，取纯背景像素）
+        self.assertEqual(img.getpixel((300, 10)), IME_BAR_BG)   # 条背景
+        self.assertNotEqual(img.getpixel((5, 60)), IME_BAR_BG)  # 光标行内无条
+
+    def test_bar_below_cursor_when_at_top(self):
+        # 光标在顶行：上方放不下 → 条放到光标行下方，不压输入行
+        img, path = self._render_with_ime(row=0)
+        os.unlink(path)
+        # 光标行 0 顶 = 2；条顶 = 2+16+2 = 20，条高 44 → 覆盖 20..63
+        self.assertNotEqual(img.getpixel((5, 10)), IME_BAR_BG)   # 输入行内无条
+        self.assertEqual(img.getpixel((300, 30)), IME_BAR_BG)    # 输入行下方有条
+
+    def test_bar_hidden_when_scrolled(self):
+        img, path = self._render_with_ime(row=3, scroll=True)
+        os.unlink(path)
+        # 滚动时组合条隐藏 → 条区域是终端内容（非条背景）
+        self.assertNotEqual(img.getpixel((300, 10)), IME_BAR_BG)
 
 
 if __name__ == '__main__':

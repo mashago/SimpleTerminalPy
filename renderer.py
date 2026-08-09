@@ -20,6 +20,12 @@ from terminal import (
 from config import COLORMAP, DEFAULT_FG, DEFAULT_BG, DEFAULT_CS
 from wcwidth import char_width
 
+# 外接拼音组合条配色与行高（与 OSK 风格一致）
+IME_BAR_H = 22
+IME_BAR_BG = (40, 40, 50, 255)
+IME_BAR_TEXT = (220, 220, 220, 255)
+IME_BAR_DIM = (150, 150, 160, 255)
+
 
 class Renderer:
     """终端渲染引擎。
@@ -175,14 +181,24 @@ class Renderer:
     # ══════════════════════════════════════════════════════
 
     def draw_frame(self, osk_surface: Image.Image | None = None,
-                   osk_top: bool = False):
-        """遍历脏行，增量渲染，合成 OSK，上传纹理。
+                   osk_top: bool = False,
+                   ext_ime=None):
+        """遍历脏行，增量渲染，合成 OSK/外接输入法组合条，上传纹理。
 
         osk_top: OSK 固定在顶部（True）还是底部（False）。
+        ext_ime: ExtIMEManager——激活时在光标行上方绘制拼音组合条
+                 （滚动状态隐藏；每帧先标脏其覆盖行恢复终端内容）。
         画布在帧间保持，不清除。只重绘变动的行。
         上传时只更新变化的像素区域（局部上传），大幅降低 CPU 开销。
         """
         term = self.term
+
+        # 外接拼音组合条覆盖的终端行（先标脏，让脏行通道恢复内容）
+        bar_range = self._ext_ime_bar_rows(ext_ime)
+        if bar_range:
+            for y in range(bar_range[0], bar_range[1] + 1):
+                if 0 <= y < term.row:
+                    term.dirty[y] = True
 
         # 脏行范围（像素区域）
         dirty_top = term.row      # 终端行号范围
@@ -203,6 +219,12 @@ class Renderer:
             dirty_top = min(dirty_top, self._old_cy, term.cursor.y)
             dirty_bot = max(dirty_bot, self._old_cy, term.cursor.y)
             self._draw_cursor()
+
+        # 外接拼音组合条（光标行上方；滚动时隐藏）
+        if bar_range:
+            self._draw_ext_ime_bar(ext_ime)
+            dirty_top = min(dirty_top, bar_range[0])
+            dirty_bot = max(dirty_bot, bar_range[1])
 
         # scrollbar 指示器（第一行区域）
         if term.scroll_offset > 0:
@@ -561,6 +583,89 @@ class Renderer:
     def toggle_blink(self):
         """切换 blink 状态。调用方应每 500ms 调用一次。"""
         self._cursor_blink = not self._cursor_blink
+
+    # ══════════════════════════════════════════════════════
+    # 外接拼音组合条
+    # ══════════════════════════════════════════════════════
+
+    def _ext_ime_bar_rows(self, ext_ime) -> tuple[int, int] | None:
+        """组合条覆盖的终端行范围 (r0, r1)；不绘制时返回 None。
+
+        条件：ext_ime 激活且终端未滚动（滚动时"输入位置"无意义）。
+        """
+        if not (ext_ime and ext_ime.active) or self.term.scroll_offset > 0:
+            return None
+        bar_top, bar_bot = self._ext_ime_bar_pixels()
+        r0 = (bar_top - self.border_px) // self.char_h
+        r1 = (bar_bot - 1 - self.border_px) // self.char_h
+        return r0, r1
+
+    def _ext_ime_bar_pixels(self) -> tuple[int, int]:
+        """组合条像素范围 (top, bottom)——跟随终端输入位置。
+
+        优先放在光标行上方（留 2px 间隙）；上方放不下（光标太靠顶）
+        则放到光标行下方，避免压住输入行；不超出屏幕边界。
+        """
+        cursor_top = self.border_px + self.term.cursor.y * self.char_h
+        bar_h = 2 * IME_BAR_H
+
+        # 上方方案：光标行上方
+        bar_bot = cursor_top - 2
+        bar_top = bar_bot - bar_h
+        if bar_top >= self.border_px:
+            return bar_top, bar_bot
+
+        # 下方方案：光标行下方（光标底边 + 2px 间隙）
+        bar_top = cursor_top + self.char_h + 2
+        bar_bot = bar_top + bar_h
+        if bar_bot > self.height:
+            bar_bot = self.height
+            bar_top = bar_bot - bar_h
+        return bar_top, bar_bot
+
+    def _draw_ext_ime_bar(self, ext_ime):
+        """绘制外接拼音组合条：组合区 + 候选区两行。"""
+        bar_top, bar_bot = self._ext_ime_bar_pixels()
+        draw = self._draw
+        draw.rectangle(
+            (0, bar_top, self.width - 1, bar_bot - 1),
+            fill=IME_BAR_BG)
+
+        y0 = bar_top + 2
+        y1 = bar_top + IME_BAR_H + 2
+        buf = ext_ime.buf
+        cands, total = ext_ime.candidates
+
+        # 第一行：组合区（拼音字母 + 光标），空时提示
+        comp = buf + "|" if buf else "拼音输入中"
+        self._draw_mixed_text(comp, 4, y0, IME_BAR_TEXT)
+
+        # 第二行：候选区（1-9 选字），页码右对齐
+        if not buf:
+            self._draw_mixed_text("输入拼音字母，1-9 选字，-/+ 翻页",
+                                  4, y1, IME_BAR_DIM)
+        elif not cands:
+            self._draw_mixed_text("无匹配 — Enter 提交原文",
+                                  4, y1, IME_BAR_DIM)
+        else:
+            text = "  ".join(f"{i + 1}{c}" for i, c in enumerate(cands))
+            x_end = self._draw_mixed_text(text, 4, y1, IME_BAR_TEXT)
+            if total > 1:
+                ind = f"第{ext_ime.page + 1}/{total}页"
+                w = sum(
+                    (self._cjk_font if ord(c) > 0x2E80 else self._pil_font)
+                    .getlength(c) for c in ind)
+                ix = min(x_end + IME_BAR_H, self.width - 4 - w)
+                self._draw_mixed_text(ind, ix, y1, IME_BAR_DIM)
+
+    def _draw_mixed_text(self, text: str, x: int, y: int,
+                         color: tuple) -> int:
+        """混合字体逐字绘制（主字体 + CJK 回退），返回结束 x。"""
+        for ch in text:
+            font = self._cjk_font if ord(ch) > 0x2E80 else self._pil_font
+            self._draw.text((x, y), ch, fill=color, font=font)
+            x += font.getlength(ch)
+        return x
 
     # ══════════════════════════════════════════════════════
     # Scroll 指示器

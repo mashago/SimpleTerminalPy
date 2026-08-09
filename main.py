@@ -27,6 +27,8 @@ from pty_handler import PtyHandler
 from renderer import Renderer
 from input_handler import InputHandler
 from osk_mgr import OSKManager
+from ext_ime_mgr import ExtIMEManager
+from pinyin_ime import PinyinEngine
 from key_calibrate import KeyCalibrator, KeyHelpScreen, load_keymap
 
 # ── 全局选项 ────────────────────────────────────────────
@@ -106,7 +108,8 @@ class SDLApp:
 
         # 输入
         self.input_handler: InputHandler | None = None
-        self.osk: OSKManager | None = None
+        self.osk_mgr: OSKManager | None = None
+        self.ext_ime_mgr: ExtIMEManager | None = None
         self.keymap: dict[str, tuple] = {}
 
         # 手柄
@@ -254,7 +257,11 @@ class SDLApp:
 
         # 输入
         self.input_handler = InputHandler(keymap=self.keymap)
-        self.osk = OSKManager(self.screen_w, self.screen_h)
+        # 拼音字典查询实例 — OSK 拼音与外接键盘拼音共享（只加载一次）
+        self.pinyin_engine = PinyinEngine()
+        self.osk_mgr = OSKManager(self.screen_w, self.screen_h,
+                              engine=self.pinyin_engine)
+        self.ext_ime_mgr = ExtIMEManager(engine=self.pinyin_engine)
 
         # 启动 PTY
         self.pty.spawn(rows=rows, cols=cols)
@@ -296,12 +303,13 @@ class SDLApp:
 
             # 渲染（持终端锁 — 与 PTY 线程的 VT100 处理互斥）
             if self.needs_redraw and self.term_renderer:
-                osk_img = (self.osk.render() if self.osk and
-                           self.osk.active else None)
-                osk_top = (self.osk.location_bottom is False
-                           if self.osk else False)
+                osk_img = (self.osk_mgr.render() if self.osk_mgr and
+                           self.osk_mgr.active else None)
+                osk_top = (self.osk_mgr.location_bottom is False
+                           if self.osk_mgr else False)
                 with self.term_lock:
-                    self.term_renderer.draw_frame(osk_img, osk_top)
+                    self.term_renderer.draw_frame(
+                        osk_img, osk_top, self.ext_ime_mgr)
                 self.needs_redraw = False
                 self._frame += 1
 
@@ -336,7 +344,12 @@ class SDLApp:
             if mod & (sdl2.KMOD_LCTRL | sdl2.KMOD_RCTRL):
                 return
             text = event.text.text.decode('utf-8', errors='replace')
-            if self.pty:
+            if self.ext_ime_mgr and self.ext_ime_mgr.active:
+                # 外接拼音激活：字母进组合、数字选字、其余透传
+                out = self.ext_ime_mgr.handle(text)
+                if out and self.pty:
+                    self.pty.write(out)
+            elif self.pty:
                 self.pty.write(text)
 
         elif etype == sdl2.SDL_JOYBUTTONDOWN:
@@ -400,7 +413,7 @@ class SDLApp:
 
     def _on_named_action(self, name: str, pressed: bool):
         """按逻辑键名分发动作（pressed=True 按下，False 松开）。"""
-        osk = self.osk
+        osk = self.osk_mgr
         pty = self.pty
         term = self.term
         if osk is None or pty is None:
@@ -425,6 +438,10 @@ class SDLApp:
         if name == "x":
             if pressed:
                 osk.active = not osk.active
+                if osk.active and self.ext_ime_mgr and \
+                        self.ext_ime_mgr.active:
+                    # 打开 OSK 时停用外接拼音（Ctrl+Space 在 OSK 开着时不生效）
+                    self.ext_ime_mgr.deactivate()
                 # OSK 切换后全屏重绘 — 清除 OSK 覆盖区域的残留
                 term.full_dirt()
                 self.needs_redraw = True
@@ -472,7 +489,7 @@ class SDLApp:
 
     def _handle_osk_action(self, name: str):
         """OSK 活跃时的动作。"""
-        osk = self.osk
+        osk = self.osk_mgr
         pty = self.pty
         term = self.term
         if osk is None or pty is None:
@@ -537,8 +554,8 @@ class SDLApp:
             name = ih.name_for(ev)
             if name in ("up", "down", "left", "right"):
                 # OSK 光标重复移动
-                if self.osk and self.osk.active:
-                    getattr(self.osk, f"move_{name}")()
+                if self.osk_mgr and self.osk_mgr.active:
+                    getattr(self.osk_mgr, f"move_{name}")()
                     self.needs_redraw = True
 
             # 加速
@@ -556,9 +573,9 @@ class SDLApp:
     _NON_PRINTING: dict[int, str] = InputHandler.NON_PRINTING_KEYS
 
     # Ctrl+符号键 → ASCII 控制字符（标准映射）
-    # tmux prefix Ctrl+\ = 0x1C；Ctrl+Space = 0x00（emacs 等）
+    # tmux prefix Ctrl+\ = 0x1C；Ctrl+Space 已改作外接拼音切换键，
+    # NUL（Ctrl+@）由 Ctrl+2 提供（emacs set-mark 可替代）
     _CTRL_SYMBOL_MAP: dict[int, str] = {
-        sdl2.SDLK_SPACE:          "\x00",   # Ctrl+Space / Ctrl+@
         sdl2.SDLK_2:              "\x00",   # Ctrl+2 == Ctrl+@
         sdl2.SDLK_LEFTBRACKET:    "\x1b",   # Ctrl+[ == ESC
         sdl2.SDLK_3:              "\x1b",   # Ctrl+3 == Ctrl+[
@@ -579,6 +596,40 @@ class SDLApp:
         mod = key.keysym.mod
         ctrl = bool(mod & (sdl2.KMOD_LCTRL | sdl2.KMOD_RCTRL))
         shift = bool(mod & (sdl2.KMOD_LSHIFT | sdl2.KMOD_RSHIFT))
+        alt = bool(mod & (sdl2.KMOD_LALT | sdl2.KMOD_RALT))
+
+        # Ctrl+Space → 切换外接拼音输入法（OSK 关闭时生效；不再发 NUL，
+        # emacs 的 set-mark 可用 Ctrl+2 替代）
+        if ctrl and sym == sdl2.SDLK_SPACE:
+            if self.osk_mgr and not self.osk_mgr.active and self.ext_ime_mgr:
+                self.ext_ime_mgr.toggle()
+                # 组合条出现/消失 → 全屏重绘防残留
+                self.term.full_dirt()
+            return
+
+        # 外接拼音输入法激活时：拦截拼音相关按键（其余透传）
+        if self.ext_ime_mgr and self.ext_ime_mgr.active:
+            seq = None
+            if sym == sdl2.SDLK_BACKSPACE:
+                seq = "\177"
+            elif sym in (sdl2.SDLK_RETURN, sdl2.SDLK_KP_ENTER):
+                seq = "\r"
+            elif sym == sdl2.SDLK_ESCAPE:
+                seq = "\x1b"
+            elif sym in (sdl2.SDLK_MINUS, sdl2.SDLK_KP_MINUS) and \
+                    not ctrl and not alt:
+                seq = "-"
+            elif sym in (sdl2.SDLK_PLUS, sdl2.SDLK_KP_PLUS,
+                         sdl2.SDLK_EQUALS, sdl2.SDLK_KP_EQUALS) and \
+                    not ctrl and not alt:
+                # = 键也翻下一页：外接键盘的 + 需 Shift+= 才能按出，
+                # 裸 = 直接翻页更顺手（hint 仍显示 -/+）
+                seq = "+"
+            if seq is not None:
+                out = self.ext_ime_mgr.handle(seq)
+                if out and self.pty:
+                    self.pty.write(out)
+                return
 
         # Ctrl+Shift+V 粘贴
         if ctrl and shift and sym == sdl2.SDLK_v:

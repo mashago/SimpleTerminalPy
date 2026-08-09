@@ -20,14 +20,16 @@ class OSKManager:
     """OSK 门面 — 语言切换 + 按键分派。"""
 
     def __init__(self, screen_w: int, screen_h: int,
-                 dict_path: str | None = None):
+                 engine=None):
         self.active = True
         self.location_bottom = True   # True=底部, False=顶部
         self.language = "en"          # 当前语言
 
+        # engine: 共享的 PinyinEngine 查询实例（与外接键盘拼音共用，
+        # 字典只加载一次）；None 时各自创建
         self._kbs: dict[str, object] = {
             "en": OSKEn(screen_w, screen_h),
-            "pinyin": OSKPinyin(screen_w, screen_h, dict_path),
+            "pinyin": OSKPinyin(screen_w, screen_h, engine=engine),
         }
 
     @property
@@ -41,8 +43,7 @@ class OSKManager:
         """语言键（🌐/中/EN）→ 切换语言，清理跨语言状态。"""
         self.language = "pinyin" if self.language == "en" else "en"
         # 清拼音组合区/页码（切换即重新开始）
-        self._kbs["pinyin"].pinyin_buf = ""
-        self._kbs["pinyin"].pinyin_page = 0
+        self._kbs["pinyin"].ime.reset()
         # 进拼音时清英文 Ctrl/Alt 锁定，避免字母被转成控制字符
         if self.language == "pinyin":
             self._kbs["en"].ctrl = False

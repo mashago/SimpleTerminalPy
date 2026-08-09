@@ -1,14 +1,15 @@
 """osk_pinyin.py — 拼音键盘。
 
-组合区/候选区状态、IME 路由（process）、顶部两行渲染。
-布局锁定小写：无 Esc/Tab/Ctrl/Alt/⇧，+ 在 0 与 ⌫ 之间，
-− 在 p 与回车之间，EN 在末行最左（请求切回英文键盘）。
+组合/候选状态委托给 PinyinIME（self.ime，纯状态机）；PinyinEngine
+查询实例可与外接键盘拼音共享（字典只加载一次）。布局锁定小写：
+无 Esc/Tab/Ctrl/Alt/⇧，+ 在 0 与 ⌫ 之间，− 在 p 与回车之间，
+EN 在末行最左（请求切回英文键盘）。
 """
 
 from PIL import ImageDraw
 
 from osk.osk_base import _OSKBase
-from pinyin_ime import PinyinIME
+from pinyin_ime import PinyinEngine, PinyinIME
 
 # ── 拼音模式布局 ────────────────────────────────────────
 # 每行: [(标签, 发送的字符串), ...]
@@ -37,11 +38,9 @@ class OSKPinyin(_OSKBase):
     extra_bar_rows = 2     # 组合区 + 候选区
 
     def __init__(self, screen_w: int, screen_h: int,
-                 dict_path: str | None = None):
+                 engine: PinyinEngine | None = None):
         super().__init__(screen_w, screen_h)
-        self.pinyin_buf = ""          # 组合区字母
-        self.pinyin_page = 0          # 候选区页码
-        self.ime = PinyinIME(dict_path)
+        self.ime = PinyinIME(engine=engine)
 
     @property
     def current_layout(self) -> list:
@@ -50,73 +49,13 @@ class OSKPinyin(_OSKBase):
     def on_modifier(self, label: str):
         pass   # 拼音布局无修饰键（EN 是语言切换键，由基类处理）
 
-    # ── 按键路由 ──────────────────────────────────────
+    # ── 按键路由（委托状态机） ─────────────────────────
 
     def process(self, seq: str | None) -> str | None:
-        """按键输出的再处理。返回要写入终端的文本，None=已消费。
-
-        - 字母 a-z（大小写均收）→ 进组合区
-        - 数字：组合区空 → 透传终端；非空 → 1..n 选字（>n 忽略）
-        - \177（⌫/B 键）→ 智能退格：组合区有字删组合，空则透传终端
-        - + / − → 候选翻页
-        - \r（↵/START）→ 组合区有字提交原文（兜底），空则透传
-        - 组合区有内容时 ␣/,/. 不进终端（否则 ⌫ 只删组合，符号无法删）
-        - 其余透传（控制字符、Alt 组合等）
-        """
-        if seq is None:
-            return None
-
-        # 字母 → 组合区
-        if len(seq) == 1 and seq.lower() in "abcdefghijklmnopqrstuvwxyz":
-            self.pinyin_buf += seq.lower()
-            self.pinyin_page = 0
-            self.invalidate()
-            return None
-
-        # 数字 → 选字 / 透传
-        if len(seq) == 1 and seq.isdigit():
-            if not self.pinyin_buf:
-                return seq          # 组合区空 → 正常输数字
-            cands, _ = self.ime.page(self.pinyin_buf, self.pinyin_page)
-            idx = int(seq) - 1
-            if 0 <= idx < len(cands):
-                out = cands[idx]
-                self.pinyin_buf = ""
-                self.pinyin_page = 0
-                self.invalidate()
-                return out          # 选中汉字 → 终端
-            return None             # 无此候选 → 忽略
-
-        # 智能退格
-        if seq == "\177":
-            if self.pinyin_buf:
-                self.pinyin_buf = self.pinyin_buf[:-1]
-                self.pinyin_page = 0
-                self.invalidate()
-                return None
-            return "\177"           # 组合区空 → 透传终端
-
-        # 候选翻页
-        if seq in ("+", "-"):
-            self._page(1 if seq == "+" else -1)
-            return None
-
-        # Enter 兜底：提交原始拼音
-        if seq in ("\r", "\n"):
-            if self.pinyin_buf:
-                out = self.pinyin_buf
-                self.pinyin_buf = ""
-                self.pinyin_page = 0
-                self.invalidate()
-                return out
-            return "\r"
-
-        # 组合区有内容时，布局上可透传的按键（空格/逗号/句号）不进终端——
-        # 否则 backspace 只能删组合区，误输入的符号无法删除
-        if self.pinyin_buf and seq in (" ", ",", "."):
-            return None
-
-        return seq
+        """按键输出的再处理（委托 PinyinIME；状态变化时刷新缓存）。"""
+        out = self.ime.process(seq)
+        self.invalidate()
+        return out
 
     def action(self, name: str) -> str | None:
         """动作键语义：b/start 走 IME（智能退格/Enter 兜底）。"""
@@ -126,24 +65,15 @@ class OSKPinyin(_OSKBase):
             return self.process("\r")
         return super().action(name)
 
-    # ── 翻页（+ / − / L1 / R1 共用） ────────────────────
-
-    def _page(self, delta: int):
-        """候选翻页（+1 下一页 / -1 上一页）。无候选或单页时无操作。"""
-        _, total = self.ime.page(self.pinyin_buf, self.pinyin_page)
-        if total <= 1:
-            return
-        self.pinyin_page += delta
-        self.pinyin_page = max(0, min(self.pinyin_page, total - 1))
-        self.invalidate()
-
     def on_l1_press(self):
         """L1 按下 → 候选上一页（类似 −）。"""
-        self._page(-1)
+        self.ime.page_prev()
+        self.invalidate()
 
     def on_r1_press(self):
         """R1 按下 → 候选下一页（类似 +）。"""
-        self._page(1)
+        self.ime.page_next()
+        self.invalidate()
 
     # ── 渲染 ──────────────────────────────────────────
 
@@ -155,7 +85,8 @@ class OSKPinyin(_OSKBase):
         """
         y0 = margin
         y1 = margin + self.bar_row_h
-        buf = self.pinyin_buf
+        buf = self.ime.buf
+        cands, total = self.ime.candidates
         layout = self.current_layout
         max_cols = max(len(row) for row in layout)
         keys_right = offset_x + (max_cols - 1) * (self.key_w + self.key_gap) \
@@ -172,7 +103,6 @@ class OSKPinyin(_OSKBase):
         self._draw_text(draw, comp, offset_x, ty0, self.COLOR_TEXT)
 
         # 第二行：候选区（1-9 选字），页码右对齐键盘右缘
-        cands, total = self.ime.page(buf, self.pinyin_page)
         if not buf:
             self._draw_text(draw, "输入拼音字母，1-9 选字，−/+/L1/R1 翻页",
                             offset_x, ty1, self.COLOR_DIM)
@@ -184,7 +114,7 @@ class OSKPinyin(_OSKBase):
             x_end = self._draw_text(draw, text, offset_x, ty1,
                                     self.COLOR_TEXT)
             if total > 1:
-                ind = f"第{self.pinyin_page + 1}/{total}页"
+                ind = f"第{self.ime.page + 1}/{total}页"
                 w = sum(
                     (self._cjk_font if self._needs_cjk(c) else self._font)
                     .getlength(c) for c in ind)
