@@ -22,51 +22,83 @@ import os
 
 PAGE_SIZE = 9
 
+# 精确优先只对"常用音节"生效：音节的最高频字达到该阈值才精确优先。
+# 叹词/生僻音节（唔/嗯/哦，最高频字 <1 万）不精确优先，
+# 否则打 n 时"唔"会跳队到 你/能 之前。
+EXACT_MIN_FREQ = 10000
+
 
 class PinyinEngine:
-    """字典查询引擎：前缀匹配 + 频率排序 + 分页（只读查询，可共享）。"""
+    """字典查询引擎：前缀匹配 + 精确优先 + 频率排序 + 分页（只读查询，可共享）。
+
+    加载时预计算全部前缀索引，按键查询 O(1)——组合区每个字母都触发
+    一次查询，不做预计算的话每次都要遍历全部拼音合并排序（掌机上
+    明显卡顿）。索引构建是首次使用（懒加载）时的一次性开销。
+    """
 
     def __init__(self, dict_path: str | None = None):
         # 默认路径与字体一致：程序所在目录
         self.dict_path = dict_path or os.path.join(
             os.path.dirname(os.path.abspath(__file__)), "pinyin_dict.json")
         self._table: dict[str, list] | None = None
+        self._index: dict[str, list[str]] = {}   # prefix → 排序后的候选
 
     @property
     def loaded(self) -> bool:
         return self._table is not None
 
     def load(self) -> bool:
-        """加载字典（懒加载入口；失败返回 False 并保留未加载状态）。"""
+        """加载字典并构建前缀索引（懒加载入口）。"""
         try:
             with open(self.dict_path, encoding="utf-8") as f:
                 self._table = json.load(f)
+            self._build_index()
             return True
         except (OSError, json.JSONDecodeError):
             return False
 
-    def candidates(self, pinyin: str) -> list[str]:
-        """返回该拼音串（前缀匹配）的全部候选，按频率降序。
+    def _build_index(self):
+        """预计算全部前缀的候选列表。
 
-        组合区每输入一个字母调用一次：候选 = 所有以该串开头的
-        拼音（如 "zh" → 中/只/之/重/种...）合并后按频率排序。
-        无匹配返回空列表。
+        排序规则（每个前缀）：**精确匹配该拼音的字在前**（如打 xi 时
+        xi 同音字 西/喜/系… 排最前），其余前缀匹配的字在后（如 xia 的
+        下/夏），各层内部按字频降序。多音字去重取最高频。
+        """
+        buckets: dict[str, dict[str, int]] = {}     # prefix → char → freq
+        exacts: dict[str, set[str]] = {}            # 完整拼音 → 其候选字
+        exact_top: dict[str, int] = {}              # 完整拼音 → 最高频字
+        for key, entries in self._table.items():
+            s = exacts.setdefault(key, set())
+            exact_top[key] = max((f for _, f in entries), default=0)
+            for i in range(1, len(key) + 1):
+                bucket = buckets.setdefault(key[:i], {})
+                for ch, freq in entries:
+                    s.add(ch)
+                    if freq > bucket.get(ch, -1):
+                        bucket[ch] = freq
+        self._index = {
+            prefix: [ch for ch, _ in sorted(
+                bucket.items(),
+                key=lambda kv: (
+                    kv[1] == 0,   # 生僻字（频次 0）永远排最后
+                    not (kv[1] > 0 and kv[0] in exacts.get(prefix, ())
+                         and exact_top.get(prefix, 0) >= EXACT_MIN_FREQ),
+                    -kv[1], kv[0]))]
+            for prefix, bucket in buckets.items()
+        }
+
+    def candidates(self, pinyin: str) -> list[str]:
+        """返回该拼音串（前缀匹配）的全部候选。
+
+        精确匹配该拼音的字在前，前缀匹配的字在后，各按频率降序。
+        无匹配返回空列表。O(1) 索引查询。
         """
         if not self._table and not self.load():
             return []
         pinyin = pinyin.strip().lower()
         if not pinyin:
             return []
-
-        merged: dict[str, int] = {}   # char → freq（多音字去重，取最高频）
-        for key, entries in self._table.items():
-            if not key.startswith(pinyin):
-                continue
-            for ch, freq in entries:
-                if freq > merged.get(ch, -1):
-                    merged[ch] = freq
-        return [ch for ch, _ in
-                sorted(merged.items(), key=lambda kv: (-kv[1], kv[0]))]
+        return self._index.get(pinyin, [])
 
     def page(self, pinyin: str, page: int = 0) -> tuple[list[str], int]:
         """返回第 page 页（0 起）候选与总页数。page 越界自动夹取。"""

@@ -256,6 +256,7 @@ class TestTrueColor(unittest.TestCase):
 
 # 合成小字典（真实字典由 generate_pinyin_dict.py 生成，测试用临时表）
 # "zh" 前缀共 12 个候选（PAGE_SIZE=9 → 2 页：9+3）
+# xi/xia 模拟"短拼音是长拼音前缀"的真实场景（西 vs 下/夏）
 TEST_PINYIN_DICT = {
     "zhong": [["中", 7000], ["种", 3000], ["重", 2000]],
     "zhi": [["只", 900], ["之", 800], ["直", 700], ["知", 600],
@@ -263,6 +264,9 @@ TEST_PINYIN_DICT = {
             ["纸", 250]],
     "ni": [["你", 6000], ["尼", 500]],
     "hao": [["好", 5000], ["号", 400]],
+    "xi": [["西", 50000], ["喜", 30000], ["系", 20000]],   # 常用音节
+    "xia": [["下", 80000], ["夏", 40000]],   # 下频次更高，但 xi 精确优先
+    "n": [["唔", 1481]],   # 叹词音节（最高频字 < EXACT_MIN_FREQ）不跳队
 }
 
 
@@ -295,6 +299,18 @@ class TestPinyinEngine(unittest.TestCase):
     def test_exact_pinyin_ordering(self):
         self.assertEqual(self.pinyin_engine.candidates("ni"), ["你", "尼"])
 
+    def test_exact_pinyin_first_over_prefix(self):
+        # 精确拼音候选在前，前缀匹配在后——
+        # 打 xi 时 xi 同音字（西/喜/系）优先于 xia 的下/夏（虽然下字频更高）
+        cands = self.pinyin_engine.candidates("xi")
+        self.assertEqual(cands, ["西", "喜", "系", "下", "夏"])
+
+    def test_rare_syllable_does_not_jump(self):
+        # 叹词音节（最高频字低于阈值）不精确优先——
+        # 打 n 时 唔 不跳队到 你/能 之前，按字频正常排
+        cands = self.pinyin_engine.candidates("n")
+        self.assertEqual(cands, ["你", "唔", "尼"])
+
     def test_paging(self):
         # 12 个候选 → 2 页（9+3，PAGE_SIZE=9）
         page0, total = self.pinyin_engine.page("zh", 0)
@@ -316,7 +332,7 @@ class TestPinyinEngine(unittest.TestCase):
     def test_empty_and_no_match(self):
         self.assertEqual(self.pinyin_engine.candidates(""), [])
         self.assertEqual(self.pinyin_engine.candidates("nihao"), [])
-        self.assertEqual(self.pinyin_engine.candidates("x"), [])   # 无 x 前缀
+        self.assertEqual(self.pinyin_engine.candidates("w"), [])   # 无 w 前缀
 
     def test_missing_dict_file(self):
         ime = PinyinEngine("/nonexistent/pinyin_dict.json")
