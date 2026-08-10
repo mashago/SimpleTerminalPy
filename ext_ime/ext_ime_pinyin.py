@@ -33,7 +33,16 @@ class ExtIMEPinyin:
         """键盘输入路由。返回要写入终端的文本，None=已消费。
 
         未激活时原样返回（不影响正常键盘输入）。
+        外接键盘翻页：- 上一页，= 下一页（= 映射为引擎的 +；
+        Shift+= 的字面加号不参与翻页，直接透传）。
         """
         if not self.active:
             return seq
+        if seq == "=":
+            # = 键：组合区有内容时翻下一页；空时原样透传（能正常打 =）
+            if self.ime.buf:
+                return self.ime.process("+")
+            return "="
+        if seq == "+":
+            return "+"      # Shift+= 的字面加号 → 直接透传（不参与翻页）
         return self.ime.process(seq)

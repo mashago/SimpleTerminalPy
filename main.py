@@ -596,7 +596,6 @@ class SDLApp:
         mod = key.keysym.mod
         ctrl = bool(mod & (sdl2.KMOD_LCTRL | sdl2.KMOD_RCTRL))
         shift = bool(mod & (sdl2.KMOD_LSHIFT | sdl2.KMOD_RSHIFT))
-        alt = bool(mod & (sdl2.KMOD_LALT | sdl2.KMOD_RALT))
 
         # Ctrl+Space → 切换外接拼音输入法（OSK 关闭时生效；不再发 NUL，
         # emacs 的 set-mark 可用 Ctrl+2 替代）
@@ -607,7 +606,8 @@ class SDLApp:
                 self.term.full_dirt()
             return
 
-        # 外接拼音输入法激活时：拦截拼音相关按键（其余透传）
+        # 外接拼音输入法激活时：拦截拼音相关按键（退格/回车/Esc，
+        # 无 TEXTINPUT 事件不会双重输入；- / = 走 TEXTINPUT 单一路径）
         if self.ext_ime_mgr and self.ext_ime_mgr.active:
             seq = None
             if sym == sdl2.SDLK_BACKSPACE:
@@ -616,15 +616,6 @@ class SDLApp:
                 seq = "\r"
             elif sym == sdl2.SDLK_ESCAPE:
                 seq = "\x1b"
-            elif sym in (sdl2.SDLK_MINUS, sdl2.SDLK_KP_MINUS) and \
-                    not ctrl and not alt:
-                seq = "-"
-            elif sym in (sdl2.SDLK_PLUS, sdl2.SDLK_KP_PLUS,
-                         sdl2.SDLK_EQUALS, sdl2.SDLK_KP_EQUALS) and \
-                    not ctrl and not alt:
-                # = 键也翻下一页：外接键盘的 + 需 Shift+= 才能按出，
-                # 裸 = 直接翻页更顺手（hint 仍显示 -/+）
-                seq = "+"
             if seq is not None:
                 out = self.ext_ime_mgr.handle(seq)
                 if out and self.pty:

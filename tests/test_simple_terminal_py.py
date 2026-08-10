@@ -709,6 +709,28 @@ class TestExtIMEPinyin(unittest.TestCase):
         self.assertEqual(self.ext.handle(" "), "中")
         self.assertEqual(self.ext.ime.buf, "")
 
+    def test_equals_key_pages_next(self):
+        # = 键（外接键盘翻下一页）：映射为引擎的 +；组合区空时透传 "+"
+        self.ext.toggle()
+        self.ext.handle("z")
+        self.ext.handle("h")
+        self.assertIsNone(self.ext.handle("="))     # 翻页（已消费）
+        self.assertEqual(self.ext.ime.page, 1)
+        self.assertEqual(self.ext.ime.buf, "zh")    # 翻页不清组合区
+        # 组合区空时 = 原样透传（能正常打 =）
+        self.ext.toggle()                           # 关闭 → 清组合区
+        self.ext.toggle()                           # 重开
+        self.assertEqual(self.ext.ime.buf, "")
+        self.assertEqual(self.ext.handle("="), "=")
+
+    def test_plus_key_is_literal(self):
+        # Shift+= 的字面加号不参与翻页，直接透传
+        self.ext.toggle()
+        self.ext.handle("z")
+        self.ext.handle("h")
+        self.assertEqual(self.ext.handle("+"), "+")
+        self.assertEqual(self.ext.ime.page, 0)      # 未翻页
+
     def test_deactivate(self):
         self.ext.toggle()
         self.ext.handle("zh")
@@ -1030,8 +1052,9 @@ class TestCtrlKeys(unittest.TestCase):
                                        sdl2.KMOD_LCTRL))
         self.assertEqual(app.pty.written, [])
 
-    def test_ime_paging_keys(self):
-        # 外接拼音激活时：- / = 键拦截为翻页（= 替代难按的 Shift+=）
+    def test_ime_keydown_special_keys(self):
+        # 外接拼音激活时：KEYDOWN 拦截退格/回车/Esc（无 TEXTINPUT，
+        # 不会双重输入）；- / = 走 TEXTINPUT 单一路径
         app = self._make_app()
 
         class _FakeIME:
@@ -1041,16 +1064,10 @@ class TestCtrlKeys(unittest.TestCase):
                 return None
 
         app.ext_ime_mgr = _FakeIME()
-        app._on_keydown(self._make_key(sdl2.SDLK_EQUALS, 0))
-        self.assertEqual(app.pty.written, ['+'])
-        app.pty.written.clear()
-        app._on_keydown(self._make_key(sdl2.SDLK_MINUS, 0))
-        self.assertEqual(app.pty.written, ['-'])
-        app.pty.written.clear()
-        # 未激活时 = 正常输入
-        app.ext_ime_mgr.active = False
-        app._on_keydown(self._make_key(sdl2.SDLK_EQUALS, 0))
-        self.assertEqual(app.pty.written, [])
+        app._on_keydown(self._make_key(sdl2.SDLK_BACKSPACE, 0))
+        app._on_keydown(self._make_key(sdl2.SDLK_RETURN, 0))
+        app._on_keydown(self._make_key(sdl2.SDLK_ESCAPE, 0))
+        self.assertEqual(app.pty.written, ['\x7f', '\r', '\x1b'])
 
     def test_ctrl_c(self):
         """Ctrl+C → \\x03。"""
